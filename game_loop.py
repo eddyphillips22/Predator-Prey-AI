@@ -4,6 +4,9 @@ import random
 import math
 import numpy as np
 import os
+import csv
+
+SAVE_FILE_PATH = "saves.csv"
 IDLE, WANDER, CHASE, EAT, REPRODUCE = 0,1,2,3,4
 P_IDLE, P_WANDER, FLEE, GRAZE, P_REPRODUCE = 0,1,2,3,4
 YEAR_LENGTH = 20.0
@@ -28,6 +31,7 @@ screen        = pygame.display.set_mode((screen_width, screen_height))
 background = pygame.image.load("background.png").convert()
 background = pygame.transform.smoothscale(background,
                                         (screen_width, screen_height))
+active_save_slot = None
 
 def load_gif_frames(path):
     pil = Image.open(path)
@@ -91,6 +95,33 @@ def handle_spectate_click(mx, my):
                 zoom_level      = 2.0    # or whatever you like
                 return True
     return False
+
+def load_save_data():
+    # Ensure CSV exists with slots 1-3
+    if not os.path.exists(SAVE_FILE_PATH):
+        with open(SAVE_FILE_PATH, "w", newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(["slot", "used"]);
+            for i in range(1, 4):
+                writer.writerow([i, False])
+    # Load used flags
+    save_data = {}
+    with open(SAVE_FILE_PATH, newline='') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            save_data[int(row['slot'])] = (row['used'] == 'True')
+    return save_data
+
+def save_save_data(save_data):
+    with open(SAVE_FILE_PATH, "w", newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(["slot", "used"])
+        for slot in sorted(save_data.keys()):
+            writer.writerow([slot, save_data[slot]])
+
+# Global save state
+save_data = load_save_data()
+
 
 
 # // CLASSES \\ #
@@ -920,6 +951,7 @@ def draw_spectate_panel():
     screen.blit(font.render(f"Currently Spectating: {spectate_target.name}", True, (255,255,255)), (400,40))
 
 def create_title_ui():
+    screen.fill((0,0,0))
     title = title_font.render("Predator / Prey Simulation", True, (255,255,255))
     screen.blit(title, (screen_width//2 - title.get_width()//2, screen_height//2 - title.get_height()//2))
     pygame.draw.rect(screen, (50,50,50), start_button)
@@ -985,6 +1017,21 @@ def create_pregame_ui():
     screen.blit(txt, (vision_slider_x, vision_slider_y - 30))
     pass
 
+def create_save_file_ui():
+    screen.fill((0, 0, 0))
+    title = title_font.render("Load/Save Game", True, (255,255,255))
+    screen.blit(title, (screen_width//2 - title.get_width()//2, 100))
+    # Draw slot buttons
+    for idx, btn in enumerate(save_file_buttons, start=1):
+        pygame.draw.rect(screen, (50,50,50), btn)
+        pygame.draw.rect(screen, (255,255,255), btn, 2)
+        label = f"Save file {idx}" if save_data.get(idx) else "No save file"
+        txt = font.render(label, True, (255,255,255))
+        screen.blit(txt, (
+            btn.x + (btn.width - txt.get_width())//2,
+            btn.y + (btn.height - txt.get_height())//2
+        ))
+    # Back button
 
 
 
@@ -1001,6 +1048,9 @@ settings_button  = pygame.Rect(screen_width-100, 10, 90, 40)
 settings_button_title  = pygame.Rect(screen_width-100, 10, 90, 40)
 back_button      = pygame.Rect(screen_width-100, 10, 90, 40)
 restart_button = pygame.Rect(screen_width-100, screen_height-100, 90, 40)
+save_file_buttons = [
+    pygame.Rect(screen_width//2 - 150, 200 + (i-1)*60, 300, 40)
+    for i in range(1, 4)]
 settings_checkboxes = [
     {"label":"Show Vision Cone", "rect":pygame.Rect(100,150,20,20), "checked":False},
     {"label":"Enable Chase Lines","rect":pygame.Rect(100,200,20,20), "checked":True},
@@ -1013,12 +1063,12 @@ frame_counter       = 0
 
 # // MAIN LOOP \\ #
 def run_game():
-    global time_multiplier, spectate_target, zoom_level, show_debug, show_vision, show_flightzone, predator_base_size, predator_vision_distance, dragging_size_slider, gif_timer, gif_index, dragging_vision_slider, predator_counts, prey_counts, time_steps, plant_spawn_timer
+    global time_multiplier, spectate_target, zoom_level, show_debug, show_vision, show_flightzone, predator_base_size, predator_vision_distance, dragging_size_slider, gif_timer, gif_index, dragging_vision_slider, predator_counts, prey_counts, time_steps, plant_spawn_timer, active_save_slot
 
     # now define your own counter for this run
     frame_counter = 0
     running       = True
-    currscreen    = 'title'
+    currscreen    = 'savefiles'
     while running:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -1080,6 +1130,14 @@ def run_game():
                         predator_group.empty()
                         plant_group.empty()
                         screen.fill((0,0,0))
+                elif currscreen == 'savefiles':
+                    for idx, btn in enumerate(save_file_buttons, start=1):
+                        if btn.collidepoint((mx, my)):
+                            if not save_data.get(idx,False):
+                                save_data[idx] = True
+                                save_save_data(save_data)
+                            active_save_slot = idx
+                            currscreen = 'title'
             elif event.type == pygame.MOUSEBUTTONUP:
                 if currscreen == 'pregame':
                     dragging_vision_slider = False
@@ -1153,7 +1211,10 @@ def run_game():
             create_pregame_ui()
             
         elif currscreen == 'endscreen':
-            create_endscreen_ui()      
+            create_endscreen_ui()
+        
+        elif currscreen == 'savefiles':
+            create_save_file_ui()     
 
         pygame.display.flip()
         frame_counter += 1
