@@ -101,23 +101,32 @@ def load_save_data():
     if not os.path.exists(SAVE_FILE_PATH):
         with open(SAVE_FILE_PATH, "w", newline='') as f:
             writer = csv.writer(f)
-            writer.writerow(["slot", "used"]);
+            writer.writerow(["slot", "used", "XP"])
             for i in range(1, 4):
-                writer.writerow([i, False])
+                writer.writerow([i, False, 0])
     # Load used flags
     save_data = {}
     with open(SAVE_FILE_PATH, newline='') as f:
         reader = csv.DictReader(f)
         for row in reader:
-            save_data[int(row['slot'])] = (row['used'] == 'True')
+            idx = int(row["slot"])
+            used = row["used"].strip().lower() == "true"
+            xp   = int(row.get("XP", 0))
+            save_data[idx] = {
+                "used": used,
+                "XP":   xp
+            }
     return save_data
 
 def save_save_data(save_data):
     with open(SAVE_FILE_PATH, "w", newline='') as f:
         writer = csv.writer(f)
-        writer.writerow(["slot", "used"])
+        writer.writerow(["slot", "used", "XP"])
         for slot in sorted(save_data.keys()):
-            writer.writerow([slot, save_data[slot]])
+            writer.writerow([
+                slot, 
+                save_data[slot]['used'],
+                save_data[slot]['XP']])
 
 # Global save state
 save_data = load_save_data()
@@ -972,7 +981,7 @@ def spawn_initial_sprites():
 
 def create_endscreen_ui():
     screen.fill((0,0,0))
-    title = title_font.render("Simulation Over", True, (255,255,255))
+    title = title_font.render(message, True, (255,255,255))
     screen.blit(title, (screen_width//2 - title.get_width()//2, 100 - title.get_height()//2))
     draw_population_graph(screen, x=275, y=150, w=550, h=250)
     start_button.x = screen_width//2 - 50
@@ -1013,9 +1022,21 @@ def create_pregame_ui():
     vision_handle_x = vision_slider_x + int(vision_slider_percent * vision_slider_w)
     pygame.draw.circle(screen, (255,255,0), (vision_handle_x, vision_slider_y + vision_slider_h//2), 10)
     
-    txt = font.render(f"Predator VIsion Distance: {predator_vision_distance}", True, (255,255,255))
+    txt = font.render(f"Predator Vision Distance: {predator_vision_distance}", True, (255,255,255))
     screen.blit(txt, (vision_slider_x, vision_slider_y - 30))
-    pass
+    if (active_save_slot is not None and save_data[active_save_slot]['XP']<2):
+        lock = pygame.image.load("lock.png").convert_alpha()
+        lock = pygame.transform.smoothscale(
+            lock,
+            (int(size_slider_h*6), int(size_slider_h*6))
+        )
+        overlay_w = size_slider_w + 10
+        overlay_h = size_slider_h + 50
+        overlay = pygame.Surface((overlay_w, overlay_h), pygame.SRCALPHA)
+        overlay.fill((100, 100, 100, 200))
+        screen.blit(overlay, (size_slider_x-5, size_slider_y - 32))
+        pygame.draw.rect(screen, (125, 0, 0), (size_slider_x-5, size_slider_y - 32, overlay_w, overlay_h), 2)
+        screen.blit(lock, (size_slider_x-5 + (overlay_w - lock.get_width())//2, size_slider_y - 32 + (overlay_h - lock.get_height())//2))
 
 def create_save_file_ui():
     screen.fill((0, 0, 0))
@@ -1063,7 +1084,7 @@ frame_counter       = 0
 
 # // MAIN LOOP \\ #
 def run_game():
-    global time_multiplier, spectate_target, zoom_level, show_debug, show_vision, show_flightzone, predator_base_size, predator_vision_distance, dragging_size_slider, gif_timer, gif_index, dragging_vision_slider, predator_counts, prey_counts, time_steps, plant_spawn_timer, active_save_slot
+    global time_multiplier, spectate_target, zoom_level, show_debug, show_vision, show_flightzone, predator_base_size, predator_vision_distance, dragging_size_slider, gif_timer, gif_index, dragging_vision_slider, predator_counts, prey_counts, time_steps, plant_spawn_timer, active_save_slot, message
 
     # now define your own counter for this run
     frame_counter = 0
@@ -1112,7 +1133,7 @@ def run_game():
                     size_slider_rect = pygame.Rect(300, 300, 400, 20)
                     vision_slider_rect = pygame.Rect(300, 220, 400, 20)
                     # slightly taller to make grabbing easier
-                    if size_slider_rect.collidepoint(mx, my):
+                    if size_slider_rect.collidepoint(mx, my) and active_save_slot is not None and save_data[active_save_slot]['XP'] >= 2:
                         dragging_size_slider = True
                     elif vision_slider_rect.collidepoint(mx, my):
                         dragging_vision_slider = True
@@ -1161,9 +1182,17 @@ def run_game():
         if currscreen=='gamescreen':
             screen.blit(background, (0,0))
             if len(predator_group) == 0:
+                message = 'Predators have gone extinct!'
                 currscreen = 'endscreen'
+                if active_save_slot is not None:
+                    save_data[active_save_slot]['XP'] += 1
+                    save_save_data(save_data)
             if len(prey_group) == 0:
+                message = 'Prey have gone extinct!'
                 currscreen = 'endscreen'
+                if active_save_slot is not None:
+                    save_data[active_save_slot]['XP'] += len(predator_group)
+                    save_save_data(save_data)
             # spawn plants periodically
             plant_spawn_timer += (1/60) * time_multiplier
             if plant_spawn_timer >= 4.0:  # spawn every 4 real seconds, scaled by time_multiplier
