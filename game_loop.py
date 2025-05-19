@@ -16,6 +16,14 @@ FULL_GROWTH_AGE = 3.0 * YEAR_LENGTH
 MAX_AGE = 20.0 * YEAR_LENGTH
 MAX_PREDATORS = 50
 MAX_PREY      = 100
+DEFAULT_SLOT = {
+    "used":       False,
+    "XP":         0,
+    "size_min":   10,
+    "size_max":  13,
+    "vision_min":110,
+    "vision_max":140
+}
 import AI
 import Old_NN
 import torch
@@ -56,7 +64,10 @@ prey_counts = []
 time_steps = []
 simulation_seconds = 0.0
 plant_spawn_timer = 0
-
+session_size_min = None
+session_size_max = None
+session_vision_min = None
+session_vision_max = None
 pygame.display.set_caption("Predator-Prey Simulation")
 clock         = pygame.time.Clock()
 first_names = ["Blimple", "Shleeby", "Plingus", "Florbam", "Zimble", "Bimplus", "Gleeby", "Flingle", "Pingus", "Limble", "Glimpus", "Flimble", "Shneeble", "Pimblus", "Sneebly", "Glimble", "Blimpy", "Zimble", "Flimsy", "Shlumpy", "Dingle", "Shlurp"]
@@ -97,36 +108,53 @@ def handle_spectate_click(mx, my):
     return False
 
 def load_save_data():
-    # Ensure CSV exists with slots 1-3
+    # If missing, create a fresh file with three default slots
     if not os.path.exists(SAVE_FILE_PATH):
-        with open(SAVE_FILE_PATH, "w", newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow(["slot", "used", "XP"])
-            for i in range(1, 4):
-                writer.writerow([i, False, 0])
-    # Load used flags
-    save_data = {}
-    with open(SAVE_FILE_PATH, newline='') as f:
+        data = {i: DEFAULT_SLOT.copy() for i in (1,2,3)}
+        save_save_data(data)
+        return data
+
+    data = {}
+    with open(SAVE_FILE_PATH, newline="") as f:
         reader = csv.DictReader(f)
         for row in reader:
             idx = int(row["slot"])
-            used = row["used"].strip().lower() == "true"
-            xp   = int(row.get("XP", 0))
-            save_data[idx] = {
-                "used": used,
-                "XP":   xp
+            data[idx] = {
+                "used":       row["used"].lower() == "true",
+                "XP":         int(row["XP"]),
+                "size_min":   int(row["size_min"]),
+                "size_max":   int(row["size_max"]),
+                "vision_min": int(row["vision_min"]),
+                "vision_max": int(row["vision_max"])
             }
-    return save_data
 
-def save_save_data(save_data):
-    with open(SAVE_FILE_PATH, "w", newline='') as f:
+    # Ensure every slot 1–3 exists
+    for i in (1,2,3):
+        if i not in data:
+            data[i] = DEFAULT_SLOT.copy()
+    return data
+
+
+def save_save_data(data):
+    # Atomically rewrite the file with all three slots in order
+    with open(SAVE_FILE_PATH, "w", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow(["slot", "used", "XP"])
-        for slot in sorted(save_data.keys()):
+        writer.writerow([
+            "slot","used","XP",
+            "size_min","size_max",
+            "vision_min","vision_max"
+        ])
+        for slot in (1,2,3):
+            sd = data.get(slot, DEFAULT_SLOT)
             writer.writerow([
-                slot, 
-                save_data[slot]['used'],
-                save_data[slot]['XP']])
+                slot,
+                sd["used"],
+                sd["XP"],
+                sd["size_min"],
+                sd["size_max"],
+                sd["vision_min"],
+                sd["vision_max"]
+            ])
 
 # Global save state
 save_data = load_save_data()
@@ -170,6 +198,7 @@ class predator(pygame.sprite.Sprite):
         self.max_hunger      = self.size * random.randint(70, 90)
         self.hunger          = self.max_hunger
         self.energy_usage    = self.size * 0.07
+        self.vision_distance_penalty = self.vision_distance / 200 + 1
 
         # chase speed & acceleration
         base_speed             = self.size * 0.05
@@ -286,7 +315,7 @@ class predator(pygame.sprite.Sprite):
                         'vision_distance', 'max_chase_speed', 'chase_acceleration'):
                 if hasattr(self, attr):
                     val = getattr(self, attr)
-                    mutated = val * random.uniform(0.9, 1.1)
+                    mutated = round(val * random.uniform(0.9, 1.1))
                     setattr(child, attr, int(mutated) if attr in ('size', 'steps_remaining') else mutated)
                 child.fertility = self.fertility * random.uniform(0.9, 1.1)
                 child.just_spawned = True
@@ -1005,7 +1034,10 @@ def create_pregame_ui():
     size_slider_w = 400
     size_slider_h = 8
     pygame.draw.rect(screen, (200,200,200), (size_slider_x, size_slider_y, size_slider_w, size_slider_h))
-    size_slider_percent = (predator_base_size - 7) / 8
+    sd = save_data[active_save_slot]
+    size_min, size_max = sd["size_min"], sd["size_max"]
+    size_range = size_max - size_min
+    size_slider_percent = (predator_base_size - size_min) / size_range
     size_handle_x = size_slider_x + int(size_slider_percent * size_slider_w)
     pygame.draw.circle(screen, (255,255,0), (size_handle_x, size_slider_y + size_slider_h//2), 10)
     
@@ -1018,7 +1050,9 @@ def create_pregame_ui():
     vision_slider_w = 400
     vision_slider_h = 8
     pygame.draw.rect(screen, (200,200,200), (vision_slider_x, vision_slider_y, vision_slider_w, vision_slider_h))
-    vision_slider_percent = (predator_vision_distance - 100) / 80
+    vision_min, vision_max = sd["vision_min"], sd["vision_max"]
+    vision_range = vision_max - vision_min
+    vision_slider_percent = (predator_vision_distance - vision_min) / vision_range
     vision_handle_x = vision_slider_x + int(vision_slider_percent * vision_slider_w)
     pygame.draw.circle(screen, (255,255,0), (vision_handle_x, vision_slider_y + vision_slider_h//2), 10)
     
@@ -1046,12 +1080,26 @@ def create_save_file_ui():
     for idx, btn in enumerate(save_file_buttons, start=1):
         pygame.draw.rect(screen, (50,50,50), btn)
         pygame.draw.rect(screen, (255,255,255), btn, 2)
-        label = f"Save file {idx}" if save_data.get(idx) else "No save file"
-        txt = font.render(label, True, (255,255,255))
-        screen.blit(txt, (
-            btn.x + (btn.width - txt.get_width())//2,
-            btn.y + (btn.height - txt.get_height())//2
-        ))
+        if save_data[idx]['used']:
+            label = f"XP: {save_data[idx]['XP']}"
+            txt = font.render(label, True, (255,255,255))
+            screen.blit(txt, (
+                btn.x + (btn.width - txt.get_width())//2,
+                btn.y + (btn.height - txt.get_height())//2 + 10
+            ))
+            label = f"Save file {idx}" if save_data[idx]['used'] else "No save file"
+            txt = font.render(label, True, (255,255,255))
+            screen.blit(txt, (
+                btn.x + (btn.width - txt.get_width())//2,
+                btn.y + (btn.height - txt.get_height())//2 - 10
+            ))
+        else:
+            label = f"Save file {idx}" if save_data[idx]['used'] else "No save file"
+            txt = font.render(label, True, (255,255,255))
+            screen.blit(txt, (
+                btn.x + (btn.width - txt.get_width())//2,
+                btn.y + (btn.height - txt.get_height())//2
+            ))
     # Back button
 
 
@@ -1070,7 +1118,7 @@ settings_button_title  = pygame.Rect(screen_width-100, 10, 90, 40)
 back_button      = pygame.Rect(screen_width-100, 10, 90, 40)
 restart_button = pygame.Rect(screen_width-100, screen_height-100, 90, 40)
 save_file_buttons = [
-    pygame.Rect(screen_width//2 - 150, 200 + (i-1)*60, 300, 40)
+    pygame.Rect(screen_width//2 - 150, 200 + (i-1)*100, 300, 70)
     for i in range(1, 4)]
 settings_checkboxes = [
     {"label":"Show Vision Cone", "rect":pygame.Rect(100,150,20,20), "checked":False},
@@ -1143,6 +1191,11 @@ def run_game():
                         prey_counts = []
                         time_steps = []
                         simulation_seconds = 0
+                        sd = save_data[active_save_slot]
+                        session_size_min    = sd["size_min"]
+                        session_size_max    = sd["size_max"]
+                        session_vision_min  = sd["vision_min"]
+                        session_vision_max  = sd["vision_max"]
                         spawn_initial_sprites()
                 elif currscreen == 'endscreen':
                     if start_button.collidepoint((mx, my)):
@@ -1155,7 +1208,7 @@ def run_game():
                     for idx, btn in enumerate(save_file_buttons, start=1):
                         if btn.collidepoint((mx, my)):
                             if not save_data.get(idx,False):
-                                save_data[idx] = True
+                                save_data[idx]['used'] = True
                                 save_save_data(save_data)
                             active_save_slot = idx
                             currscreen = 'title'
@@ -1166,33 +1219,51 @@ def run_game():
             
             elif event.type == pygame.MOUSEMOTION:
                 if currscreen == 'pregame':
+                    sd = save_data[active_save_slot]
                     if dragging_size_slider:
                         mx, my = pygame.mouse.get_pos()
                         rel_x = max(0, min(mx - 300, 400))
                         percent = rel_x / 400
-                        predator_base_size = int(round(7 + percent * 8))
+                        predator_base_size = int(round(
+                            sd["size_min"] + percent * (sd["size_max"] - sd["size_min"])
+                        ))
                     elif dragging_vision_slider:
                         mx, my = pygame.mouse.get_pos()
                         rel_x = max(0, min(mx - 300, 400))
                         percent = rel_x / 400
-                        predator_vision_distance = int(round(100 + percent * 80))
+                        predator_vision_distance = int(round(
+                            sd["vision_min"] + percent * (sd["vision_max"] - sd["vision_min"])
+                        ))
 
         clock.tick(60)
 
         if currscreen=='gamescreen':
             screen.blit(background, (0,0))
-            if len(predator_group) == 0:
-                message = 'Predators have gone extinct!'
+            if len(predator_group) == 0 or len(prey_group) == 0:
+                # choose your message
+                if len(predator_group) == 0:
+                    message = 'Predators have gone extinct!'
+                    xp_gain = 1
+                else:
+                    message = 'Prey have gone extinct!'
+                    xp_gain = len(predator_group)
+
                 currscreen = 'endscreen'
+
                 if active_save_slot is not None:
-                    save_data[active_save_slot]['XP'] += 1
+                    sd = save_data[active_save_slot]
+                    # 1) bump XP
+                    sd["XP"] += xp_gain
+
+                    # 2) merge session bounds into slot
+                    sd["size_min"]   = int(round(min(sd["size_min"],    session_size_min),0))
+                    sd["size_max"]   = int(round(max(sd["size_max"],    session_size_max),0))
+                    sd["vision_min"] = int(round(min(sd["vision_min"],  session_vision_min),0))
+                    sd["vision_max"] = int(round(max(sd["vision_max"],  session_vision_max),0))
+
+                    # 3) persist everything
                     save_save_data(save_data)
-            if len(prey_group) == 0:
-                message = 'Prey have gone extinct!'
-                currscreen = 'endscreen'
-                if active_save_slot is not None:
-                    save_data[active_save_slot]['XP'] += len(predator_group)
-                    save_save_data(save_data)
+
             # spawn plants periodically
             plant_spawn_timer += (1/60) * time_multiplier
             if plant_spawn_timer >= 4.0:  # spawn every 4 real seconds, scaled by time_multiplier
@@ -1214,6 +1285,11 @@ def run_game():
 
             # updates
             predator_group.update()
+            for p in predator_group:
+                session_size_min   = min(session_size_min, p.size)
+                session_size_max   = max(session_size_max, p.size)
+                session_vision_min = min(session_vision_min, p.vision_distance)
+                session_vision_max = max(session_vision_max, p.vision_distance)
             prey_group.update()
             plant_group.update()
 
