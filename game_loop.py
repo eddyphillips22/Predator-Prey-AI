@@ -193,12 +193,15 @@ class predator(pygame.sprite.Sprite):
         self.children_count = 0
 
         # vision & hunger
-        self.fov             = math.radians(random.randint(60, 100))
-        self.vision_distance = max(1, int(predator_vision_distance * variation))
+        self.vision_distance = max(1, int(predator_vision_distance * variation)) + self.size
+        max_vision = 300.0
+        vd = min(self.vision_distance, max_vision)
+        max_fov = math.pi 
+        self.fov = max_fov * (1 - vd / max_vision)
         self.max_hunger      = self.size * random.randint(70, 90)
         self.hunger          = self.max_hunger
         self.energy_usage    = self.size * 0.07
-        self.vision_distance_penalty = self.vision_distance / 200 + 1
+
 
         # chase speed & acceleration
         base_speed             = self.size * 0.05
@@ -1058,7 +1061,7 @@ def create_pregame_ui():
     
     txt = font.render(f"Predator Vision Distance: {predator_vision_distance}", True, (255,255,255))
     screen.blit(txt, (vision_slider_x, vision_slider_y - 30))
-    if (active_save_slot is not None and save_data[active_save_slot]['XP']<2):
+    if (active_save_slot is not None and save_data[active_save_slot]['XP']<10):
         lock = pygame.image.load("lock.png").convert_alpha()
         lock = pygame.transform.smoothscale(
             lock,
@@ -1100,6 +1103,15 @@ def create_save_file_ui():
                 btn.x + (btn.width - txt.get_width())//2,
                 btn.y + (btn.height - txt.get_height())//2
             ))
+        for idx, btn in enumerate(delete_save_button, start=1):
+            if save_data[idx]['used']:
+                pygame.draw.rect(screen, (50,50,50), btn)
+                pygame.draw.rect(screen, (255,255,255), btn, 2)
+                txt = font.render("X", True, (255,0,0))
+                screen.blit(txt, (
+                    btn.x + (btn.width - txt.get_width())//2,
+                    btn.y + (btn.height - txt.get_height())//2
+                ))
     # Back button
 
 
@@ -1117,6 +1129,9 @@ settings_button  = pygame.Rect(screen_width-100, 10, 90, 40)
 settings_button_title  = pygame.Rect(screen_width-100, 10, 90, 40)
 back_button      = pygame.Rect(screen_width-100, 10, 90, 40)
 restart_button = pygame.Rect(screen_width-100, screen_height-100, 90, 40)
+delete_save_button = [
+    pygame.Rect(screen_width//2 + 160, 220 + (i-1)*100, 30, 30)
+    for i in range(1, 4)]
 save_file_buttons = [
     pygame.Rect(screen_width//2 - 150, 200 + (i-1)*100, 300, 70)
     for i in range(1, 4)]
@@ -1173,6 +1188,7 @@ def run_game():
                             prey_group.empty()
                             predator_group.empty()
                             plant_group.empty()
+                            message = "Simulation Terminated"
                             screen.fill((0,0,0))
                 elif currscreen == 'title':
                     if start_button.collidepoint((mx, my)):
@@ -1181,7 +1197,7 @@ def run_game():
                     size_slider_rect = pygame.Rect(300, 300, 400, 20)
                     vision_slider_rect = pygame.Rect(300, 220, 400, 20)
                     # slightly taller to make grabbing easier
-                    if size_slider_rect.collidepoint(mx, my) and active_save_slot is not None and save_data[active_save_slot]['XP'] >= 2:
+                    if size_slider_rect.collidepoint(mx, my) and active_save_slot is not None and save_data[active_save_slot]['XP'] >= 10:
                         dragging_size_slider = True
                     elif vision_slider_rect.collidepoint(mx, my):
                         dragging_vision_slider = True
@@ -1207,11 +1223,17 @@ def run_game():
                 elif currscreen == 'savefiles':
                     for idx, btn in enumerate(save_file_buttons, start=1):
                         if btn.collidepoint((mx, my)):
-                            if not save_data.get(idx,False):
+                            if save_data[idx]['used'] == False:
                                 save_data[idx]['used'] = True
                                 save_save_data(save_data)
                             active_save_slot = idx
                             currscreen = 'title'
+                    for idx, btn in enumerate(delete_save_button, start=1):
+                        if btn.collidepoint((mx, my)):
+                            data = DEFAULT_SLOT
+                            for key in data:
+                                save_data[idx][key] = data[key]
+                            save_save_data(save_data)
             elif event.type == pygame.MOUSEBUTTONUP:
                 if currscreen == 'pregame':
                     dragging_vision_slider = False
