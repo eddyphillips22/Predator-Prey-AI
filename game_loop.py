@@ -22,7 +22,9 @@ DEFAULT_SLOT = {
     "size_min":   10,
     "size_max":  13,
     "vision_min":110,
-    "vision_max":140
+    "vision_max":140,
+    "fertility_min": 0.8,
+    "fertility_max": 1,
 }
 import AI
 import Old_NN
@@ -36,7 +38,7 @@ pygame.init()
 screen_width  = 1100
 screen_height = 600
 screen        = pygame.display.set_mode((screen_width, screen_height))
-background = pygame.image.load("background.png").convert()
+background = pygame.image.load("assets/background.png").convert()
 background = pygame.transform.smoothscale(background,
                                         (screen_width, screen_height))
 active_save_slot = None
@@ -55,7 +57,7 @@ def load_gif_frames(path):
     except EOFError:
         pass
     return frames
-gif_frames   = load_gif_frames("title_background.gif")
+gif_frames   = load_gif_frames("assets/title_background.gif")
 gif_index    = 0
 gif_timer    = 0
 GIF_FPS      = 60
@@ -68,6 +70,8 @@ session_size_min = None
 session_size_max = None
 session_vision_min = None
 session_vision_max = None
+session_fertility_min = None
+session_fertility_max = None
 pygame.display.set_caption("Predator-Prey Simulation")
 clock         = pygame.time.Clock()
 first_names = ["Blimple", "Shleeby", "Plingus", "Florbam", "Zimble", "Bimplus", "Gleeby", "Flingle", "Pingus", "Limble", "Glimpus", "Flimble", "Shneeble", "Pimblus", "Sneebly", "Glimble", "Blimpy", "Zimble", "Flimsy", "Shlumpy", "Dingle", "Shlurp"]
@@ -84,9 +88,16 @@ MAX_IDLE = 60
 predator_group = pygame.sprite.Group()
 prey_group = pygame.sprite.Group()
 predator_base_size = 12
-predator_vision_distance = 100
+predator_vision_distance = 120
+predator_fertility = 0.9
 dragging_vision_slider = False
 dragging_size_slider = False
+dragging_fertility_slider = False
+tunnel_offset     = 0      
+tunnel_speed      = 1.2
+tunnel_spacing    = 40   
+tunnel_line_width = 2      
+tunnel_color      = (60,60,60)
 
 # // UNIVERSAL FUNCTIONS \\ #
 def get_world_coords(mx, my):
@@ -125,7 +136,9 @@ def load_save_data():
                 "size_min":   int(row["size_min"]),
                 "size_max":   int(row["size_max"]),
                 "vision_min": int(row["vision_min"]),
-                "vision_max": int(row["vision_max"])
+                "vision_max": int(row["vision_max"]),
+                "fertility_min": float(row["fertility_min"]),
+                "fertility_max": float(row["fertility_max"]),
             }
 
     # Ensure every slot 1–3 exists
@@ -142,7 +155,8 @@ def save_save_data(data):
         writer.writerow([
             "slot","used","XP",
             "size_min","size_max",
-            "vision_min","vision_max"
+            "vision_min","vision_max",
+            "fertility_min","fertility_max"
         ])
         for slot in (1,2,3):
             sd = data.get(slot, DEFAULT_SLOT)
@@ -153,11 +167,43 @@ def save_save_data(data):
                 sd["size_min"],
                 sd["size_max"],
                 sd["vision_min"],
-                sd["vision_max"]
+                sd["vision_max"],
+                sd["fertility_min"],
+                sd["fertility_max"]
             ])
 
 # Global save state
 save_data = load_save_data()
+
+def create_tunnel_background():
+    """
+    Call once per frame when on the title screen.
+    Fills the screen black, then draws concentric circle outlines
+    whose radii march outward to simulate flying through a tunnel.
+    """
+    global tunnel_offset
+
+    # 1) Black background
+    screen.fill((0,0,0))
+
+    # 2) Compute center & maximum radius we need to cover corners
+    cx, cy = screen_width // 2, screen_height // 2
+    max_radius = int(((screen_width**2 + screen_height**2)**0.5) / 2) + tunnel_spacing
+
+    # 3) Advance the offset & wrap
+    tunnel_offset = (tunnel_offset + tunnel_speed) % tunnel_spacing
+
+    # 4) Draw rings every tunnel_spacing pixels
+    r = tunnel_offset
+    while r < max_radius:
+        pygame.draw.circle(
+            screen,
+            tunnel_color,
+            (cx, cy),
+            int(r),
+            tunnel_line_width
+        )
+        r += tunnel_spacing
 
 
 
@@ -189,18 +235,19 @@ class predator(pygame.sprite.Sprite):
         self.age_seconds = 0.0
         self.growth_rate = random.uniform(0.3, 1)
         self.growth_factor = 0.5
-        self.fertility = random.uniform(0.9, 1)
+        self.fertility = max(1, float(predator_fertility * random.uniform(0.9, 1.1)))
         self.children_count = 0
+        self.disabled = False
 
         # vision & hunger
         self.vision_distance = max(1, int(predator_vision_distance * variation)) + self.size
         max_vision = 300.0
         vd = min(self.vision_distance, max_vision)
-        max_fov = math.pi 
+        max_fov = math.pi
         self.fov = max_fov * (1 - vd / max_vision)
         self.max_hunger      = self.size * random.randint(70, 90)
         self.hunger          = self.max_hunger
-        self.energy_usage    = self.size * 0.07
+        self.energy_usage    = self.size * 0.05
 
 
         # chase speed & acceleration
@@ -219,7 +266,12 @@ class predator(pygame.sprite.Sprite):
         
         self.time_since_eat = 0
         # sprite image
-        self.image = pygame.image.load("predimg.png").convert_alpha()
+        if self.vision_distance > 270:
+            self.image = pygame.image.load("assets/cyclopspred.png").convert_alpha()
+        elif self.disabled:
+            self.image = pygame.image.load("assets/disabledpred.png").convert_alpha()
+        else:
+            self.image = pygame.image.load("assets/predimg.png").convert_alpha()
         self.image = pygame.transform.smoothscale(
             self.image,
             (int(self.size*2), int(self.size*2))
@@ -307,24 +359,51 @@ class predator(pygame.sprite.Sprite):
     
     def reproduce(self):
         children = []
-        if random.random() > self.fertility:
-            return children
-        count = 1
-        if self.fertility > 1 and random.random() < (self.fertility - 1):
-            count = 2
+        f = self.fertility
+        base = int(f)
+        fractional = f - base 
+        extra = 1 if random.random() < fractional else 0
+        count = base + extra
+        
+        excess = max(0, count - 3)
+        disabled_chance = min(1.0, 0.3 * excess)
+        print(f"[DEBUG] Repro count={count}, disabled_chance={disabled_chance:.2f}")
+        
         for _ in range(count):
+            disabled = (random.random() < disabled_chance)
+            if disabled:
+                print(f"[DEBUG] Predator {self.name} disabled child")
             child = predator(self.x, self.y)
             for attr in ('size', 'base_speed', 'max_hunger', 'energy_usage', 'fov',
                         'vision_distance', 'max_chase_speed', 'chase_acceleration'):
                 if hasattr(self, attr):
                     val = getattr(self, attr)
-                    mutated = round(val * random.uniform(0.9, 1.1))
+                    factor = random.uniform(0.2, 0.6) if disabled else random.uniform(0.9, 1.1)
+                    mutated = round(val * factor)
+                    if attr == 'size':
+                        mutated = val
                     setattr(child, attr, int(mutated) if attr in ('size', 'steps_remaining') else mutated)
+            child.fertility = self.fertility * random.uniform(0.9, 1.1)
+                
+            if disabled:
+                child.fertility = 0.0
+                child.growth_rate = 0.2
+                child.energy_usage = child.size * 0.5
+                child.base_speed = 0.1
+                child.max_hunger = child.max_hunger * random.uniform(0.1, 0.2)
+                child.disabled  = True
+                img = pygame.image.load("assets/disabledpred.png").convert_alpha()
+                img = pygame.transform.smoothscale(img, (int(child.size*2), int(child.size*2)))
+                child.original_image = img
+                child.image          = img
+            else:
                 child.fertility = self.fertility * random.uniform(0.9, 1.1)
-                child.just_spawned = True
-                child.hunger = child.max_hunger * (2/3)
-                child.rect = child.image.get_rect(center=(child.x, child.y))
-                children.append(child)
+                child.disabled  = False
+                    
+            child.just_spawned = True
+            child.hunger = child.max_hunger * (2/3)
+            child.rect = child.image.get_rect(center=(child.x, child.y))
+            children.append(child)
         self.action = IDLE
         self.children_count += len(children)
         return children
@@ -363,7 +442,7 @@ class predator(pygame.sprite.Sprite):
                 self.lost_counter = 0
                 # eat
                 self.target_prey.kill()
-                self.hunger += max(self.max_hunger, self.hunger + self.target_prey.max_hunger)
+                self.hunger = self.max_hunger
                 self.chasing = False
                 self.current_speed = self.base_speed
             elif dist <= self.vision_distance:
@@ -504,7 +583,7 @@ class prey(pygame.sprite.Sprite):
         self.time_since_idle = 0
 
         # sprite
-        self.image = pygame.image.load("preyimg.png").convert_alpha()
+        self.image = pygame.image.load("assets/preyimg.png").convert_alpha()
         self.image = pygame.transform.smoothscale(
             self.image,
             (int(self.size*2), int(self.size*2))
@@ -992,14 +1071,34 @@ def draw_spectate_panel():
     screen.blit(font.render(f"Currently Spectating: {spectate_target.name}", True, (255,255,255)), (400,40))
 
 def create_title_ui():
-    screen.fill((0,0,0))
+    create_tunnel_background()
     title = title_font.render("Predator / Prey Simulation", True, (255,255,255))
+    orig_img   = pygame.image.load("assets/start_button2.png").convert_alpha()
+    orig_w, h  = orig_img.get_size()
+    scale      = 2
+    
+    start_image = pygame.transform.smoothscale(
+    orig_img,
+    (orig_w * scale, h * scale)
+    )
+    
+    start_button = start_image.get_rect(
+    center=(
+        screen_width//2,
+        screen_height//2 + 200
+    ))
+    
     screen.blit(title, (screen_width//2 - title.get_width()//2, screen_height//2 - title.get_height()//2))
-    pygame.draw.rect(screen, (50,50,50), start_button)
-    pygame.draw.rect(screen, (255,255,255), start_button, 2)
-    txt = font.render("Start", True, (255,255,255))
-    screen.blit(txt, (start_button.x + (start_button.width - txt.get_width())//2,
-                    start_button.y + (start_button.height - txt.get_height())//2))
+    screen.blit(start_image, start_button.topleft)
+    pygame.draw.rect(screen, (0,0,0), start_button,2)
+    
+    # back button
+    pygame.draw.rect(screen, (50,50,50), back_button)
+    pygame.draw.rect(screen, (255,255,255), back_button, 2)
+    txt = font.render("Back", True, (255,255,255))
+    screen.blit(txt, (back_button.x + (back_button.width - txt.get_width())//2,
+                    back_button.y + (back_button.height - txt.get_height())//2))
+
 
 def spawn_initial_sprites():
     for _ in range(10):
@@ -1012,7 +1111,7 @@ def spawn_initial_sprites():
                         random.randint(10,screen_height-10)))
 
 def create_endscreen_ui():
-    screen.fill((0,0,0))
+    create_tunnel_background()
     title = title_font.render(message, True, (255,255,255))
     screen.blit(title, (screen_width//2 - title.get_width()//2, 100 - title.get_height()//2))
     draw_population_graph(screen, x=275, y=150, w=550, h=250)
@@ -1025,58 +1124,135 @@ def create_endscreen_ui():
                     start_button.y + (start_button.height - txt.get_height())//2))
     
 def create_pregame_ui():
-    screen.fill((0,0,0))
+    # 1) background
+    create_tunnel_background()
+
+    # 2) centre X
+    center_x = screen_width // 2
+
+    # 3) Draw Start button centred
+    #    (assumes start_image and start_button Rect exist)
+    start_button.centerx = center_x
+    screen.blit(start_image, start_button.topleft)
     pygame.draw.rect(screen, (50,50,50), start_button)
     pygame.draw.rect(screen, (255,255,255), start_button, 2)
     txt = font.render("Start", True, (255,255,255))
-    screen.blit(txt, (start_button.x + (start_button.width - txt.get_width())//2,
-                    start_button.y + (start_button.height - txt.get_height())//2))
-    # Size slider
-    size_slider_x = 300
+    screen.blit(
+        txt,
+        (start_button.x + (start_button.width - txt.get_width())//2,
+        start_button.y + (start_button.height - txt.get_height())//2)
+    )
+
+    # 4) Common slider width & horizontal origin
+    slider_w = 400
+    slider_h = 8
+    slider_x = screen_width//2 - slider_w//2
+    slider_y = 300
+
+    
+
+    # --- Size slider ---
     size_slider_y = 300
-    size_slider_w = 400
     size_slider_h = 8
-    pygame.draw.rect(screen, (200,200,200), (size_slider_x, size_slider_y, size_slider_w, size_slider_h))
+    size_slider_rect = pygame.Rect(
+        slider_x, size_slider_y,
+        slider_w, slider_h
+    )
+    screen.blit(track_img, size_slider_rect.topleft)
     sd = save_data[active_save_slot]
     size_min, size_max = sd["size_min"], sd["size_max"]
-    size_range = size_max - size_min
-    size_slider_percent = (predator_base_size - size_min) / size_range
-    size_handle_x = size_slider_x + int(size_slider_percent * size_slider_w)
-    pygame.draw.circle(screen, (255,255,0), (size_handle_x, size_slider_y + size_slider_h//2), 10)
-    
+    pct = (predator_base_size - size_min) / (size_max - size_min)
+    handle_x = slider_x + int(pct * slider_w)
+    sh = size_handle_img.get_height()
+    sw = size_handle_img.get_width()
+    hx = handle_x - sw//2
+    hy = size_slider_y + size_slider_h//2 - sh//2
+    screen.blit(size_handle_img, (hx, hy))
     txt = font.render(f"Predator Size: {predator_base_size}", True, (255,255,255))
-    screen.blit(txt, (size_slider_x, size_slider_y - 30))
-    
-    #Vision distance slider
-    vision_slider_x = 300
+    screen.blit(
+        txt,
+        ((screen_width - txt.get_width())//2, size_slider_y - 30)
+    )
+
+    # --- Vision slider ---
     vision_slider_y = 220
-    vision_slider_w = 400
     vision_slider_h = 8
-    pygame.draw.rect(screen, (200,200,200), (vision_slider_x, vision_slider_y, vision_slider_w, vision_slider_h))
-    vision_min, vision_max = sd["vision_min"], sd["vision_max"]
-    vision_range = vision_max - vision_min
-    vision_slider_percent = (predator_vision_distance - vision_min) / vision_range
-    vision_handle_x = vision_slider_x + int(vision_slider_percent * vision_slider_w)
-    pygame.draw.circle(screen, (255,255,0), (vision_handle_x, vision_slider_y + vision_slider_h//2), 10)
-    
-    txt = font.render(f"Predator Vision Distance: {predator_vision_distance}", True, (255,255,255))
-    screen.blit(txt, (vision_slider_x, vision_slider_y - 30))
-    if (active_save_slot is not None and save_data[active_save_slot]['XP']<10):
-        lock = pygame.image.load("lock.png").convert_alpha()
-        lock = pygame.transform.smoothscale(
-            lock,
-            (int(size_slider_h*6), int(size_slider_h*6))
-        )
-        overlay_w = size_slider_w + 10
-        overlay_h = size_slider_h + 50
-        overlay = pygame.Surface((overlay_w, overlay_h), pygame.SRCALPHA)
-        overlay.fill((100, 100, 100, 200))
-        screen.blit(overlay, (size_slider_x-5, size_slider_y - 32))
-        pygame.draw.rect(screen, (125, 0, 0), (size_slider_x-5, size_slider_y - 32, overlay_w, overlay_h), 2)
-        screen.blit(lock, (size_slider_x-5 + (overlay_w - lock.get_width())//2, size_slider_y - 32 + (overlay_h - lock.get_height())//2))
+    vision_slider_rect = pygame.Rect(
+        slider_x, vision_slider_y,
+        slider_w, slider_h
+    )
+    screen.blit(track_img, vision_slider_rect.topleft)
+    vis_min, vis_max = sd["vision_min"], sd["vision_max"]
+    pct = (predator_vision_distance - vis_min) / (vis_max - vis_min)
+    handle_x = slider_x + int(pct * slider_w)
+    vh = vision_handle_img.get_height()
+    vw = vision_handle_img.get_width()
+    hx = handle_x - vw//2
+    hy = vision_slider_y + vision_slider_h//2 - vh//2
+    screen.blit(vision_handle_img, (hx, hy))
+    txt = font.render(f"Predator Vision: {predator_vision_distance}", True, (255,255,255))
+    screen.blit(
+        txt,
+        ((screen_width - txt.get_width())//2, vision_slider_y - 30)
+    )
+
+    # --- Fertility slider ---
+    fertility_slider_y = 380
+    fertility_slider_h = 8
+    fertility_slider_rect = pygame.Rect(
+        slider_x, fertility_slider_y,
+        slider_w, slider_h
+    )
+    screen.blit(track_img, fertility_slider_rect.topleft + (0, 80))
+    fert_min, fert_max = sd["fertility_min"], sd["fertility_max"]
+    pct = (predator_fertility - fert_min) / (fert_max - fert_min)
+    handle_x = slider_x + int(pct * slider_w)
+    fh = fertility_handle_img.get_height()
+    fw = fertility_handle_img.get_width()
+    hx = handle_x - fw//2
+    hy = fertility_slider_y + fertility_slider_h//2 - fh//2
+    screen.blit(fertility_handle_img, (hx, hy))
+    txt = font.render(f"Predator Fertility: {predator_fertility}", True, (255,255,255))
+    screen.blit(
+        txt,
+        ((screen_width - txt.get_width())//2, fertility_slider_y - 30)
+    )
+
+    # --- Locks (also centred over their slider) ---
+    lock = pygame.image.load("assets/locked.png").convert_alpha()
+    if sd['XP'] < 10:
+        # draw lock above size slider
+        lx = center_x - lock.get_width() // 2
+        ly = size_slider_y - 32
+        screen.blit(lock, (lx, ly))
+        
+        txt = font.render(f"XP {sd['XP']}/10", True, (255,255,255))
+        padding = 10
+        txt_x = lx + lock.get_width() + padding
+        lock_cy = ly + lock.get_height() // 2
+        txt_y = lock_cy - txt.get_height() // 2
+        screen.blit(txt, (txt_x, txt_y))
+    if sd['XP'] < 50:
+        # draw lock above fertility slider
+        lx = center_x - lock.get_width() // 2
+        ly = fertility_slider_y - 32
+        screen.blit(lock, (lx, ly))
+        
+        txt = font.render(f"XP {sd['XP']}/50", True, (255,255,255))
+        padding = 10
+        txt_x = lx + lock.get_width() + padding
+        lock_cy = ly + lock.get_height() // 2
+        txt_y = lock_cy - txt.get_height() // 2
+        screen.blit(txt, (txt_x, txt_y))
+    # back button
+    pygame.draw.rect(screen, (50,50,50), back_button)
+    pygame.draw.rect(screen, (255,255,255), back_button, 2)
+    txt = font.render("Back", True, (255,255,255))
+    screen.blit(txt, (back_button.x + (back_button.width - txt.get_width())//2,
+                    back_button.y + (back_button.height - txt.get_height())//2))
 
 def create_save_file_ui():
-    screen.fill((0, 0, 0))
+    create_tunnel_background()
     title = title_font.render("Load/Save Game", True, (255,255,255))
     screen.blit(title, (screen_width//2 - title.get_width()//2, 100))
     # Draw slot buttons
@@ -1122,8 +1298,24 @@ prey_group     = pygame.sprite.Group()
 plant_group    = pygame.sprite.Group()
 
 # // UI ELEMENTS \\ #
+fertility_handle_img = pygame.image.load("assets/fertility_handle.png").convert_alpha()
+fertility_handle_img = pygame.transform.smoothscale(
+    fertility_handle_img,
+    (24, 24) 
+)
+size_handle_img = pygame.image.load("assets/size_handle.png").convert_alpha()
+size_handle_img = pygame.transform.smoothscale(
+    size_handle_img,
+    (24, 24) 
+)
+vision_handle_img = pygame.image.load("assets/vision_handle2.png").convert_alpha()
+track_img = pygame.image.load("assets/slider.png").convert_alpha()
 slow_down_button = pygame.Rect(screen_width-200, screen_height-50, 90, 40)
-start_button = pygame.Rect(screen_width//2 - 50, screen_height - 100, 100, 40)
+start_image = pygame.image.load("assets/start_button2.png").convert_alpha()
+start_button = start_image.get_rect(center=(
+    screen_width//2,
+    screen_height//2 + 200
+))
 speed_up_button  = pygame.Rect(screen_width-100, screen_height-50, 90, 40)
 settings_button  = pygame.Rect(screen_width-100, 10, 90, 40)
 settings_button_title  = pygame.Rect(screen_width-100, 10, 90, 40)
@@ -1147,7 +1339,7 @@ frame_counter       = 0
 
 # // MAIN LOOP \\ #
 def run_game():
-    global time_multiplier, spectate_target, zoom_level, show_debug, show_vision, show_flightzone, predator_base_size, predator_vision_distance, dragging_size_slider, gif_timer, gif_index, dragging_vision_slider, predator_counts, prey_counts, time_steps, plant_spawn_timer, active_save_slot, message
+    global time_multiplier, spectate_target, zoom_level, show_debug, show_vision, show_flightzone, predator_base_size, predator_vision_distance, dragging_size_slider, gif_timer, gif_index, dragging_vision_slider, predator_counts, prey_counts, time_steps, plant_spawn_timer, active_save_slot, message, predator_fertility, dragging_fertility_slider
 
     # now define your own counter for this run
     frame_counter = 0
@@ -1193,14 +1385,20 @@ def run_game():
                 elif currscreen == 'title':
                     if start_button.collidepoint((mx, my)):
                         currscreen = 'pregame'
+                    elif back_button.collidepoint((mx, my)):
+                        currscreen = 'savefiles'
+                        active_save_slot = None
                 elif currscreen == "pregame":
                     size_slider_rect = pygame.Rect(300, 300, 400, 20)
                     vision_slider_rect = pygame.Rect(300, 220, 400, 20)
+                    fertility_handle_rect = pygame.Rect(300, 380, 400, 20)
                     # slightly taller to make grabbing easier
                     if size_slider_rect.collidepoint(mx, my) and active_save_slot is not None and save_data[active_save_slot]['XP'] >= 10:
                         dragging_size_slider = True
-                    elif vision_slider_rect.collidepoint(mx, my):
+                    elif vision_slider_rect.collidepoint(mx, my):   
                         dragging_vision_slider = True
+                    elif fertility_handle_rect.collidepoint(mx, my) and active_save_slot is not None and save_data[active_save_slot]['XP'] >= 50:
+                        dragging_fertility_slider = True
                     elif start_button.collidepoint((mx, my)):
                         currscreen = 'gamescreen'
                         predator_counts = []
@@ -1212,7 +1410,11 @@ def run_game():
                         session_size_max    = sd["size_max"]
                         session_vision_min  = sd["vision_min"]
                         session_vision_max  = sd["vision_max"]
+                        session_fertility_min = sd["fertility_min"]
+                        session_fertility_max = sd["fertility_max"]
                         spawn_initial_sprites()
+                    elif back_button.collidepoint((mx, my)):
+                        currscreen = 'title'
                 elif currscreen == 'endscreen':
                     if start_button.collidepoint((mx, my)):
                         currscreen = 'pregame'
@@ -1238,6 +1440,7 @@ def run_game():
                 if currscreen == 'pregame':
                     dragging_vision_slider = False
                     dragging_size_slider = False
+                    dragging_fertility_slider = False
             
             elif event.type == pygame.MOUSEMOTION:
                 if currscreen == 'pregame':
@@ -1255,6 +1458,13 @@ def run_game():
                         percent = rel_x / 400
                         predator_vision_distance = int(round(
                             sd["vision_min"] + percent * (sd["vision_max"] - sd["vision_min"])
+                        ))
+                    elif dragging_fertility_slider:
+                        mx, my = pygame.mouse.get_pos()
+                        rel_x = max(0, min(mx - 300, 400))
+                        percent = rel_x / 400
+                        predator_fertility = float(round(
+                            sd["fertility_min"] + percent * (sd["fertility_max"] - sd["fertility_min"]),2
                         ))
 
         clock.tick(60)
@@ -1282,6 +1492,8 @@ def run_game():
                     sd["size_max"]   = int(round(max(sd["size_max"],    session_size_max),0))
                     sd["vision_min"] = int(round(min(sd["vision_min"],  session_vision_min),0))
                     sd["vision_max"] = int(round(max(sd["vision_max"],  session_vision_max),0))
+                    sd["fertility_min"] = float(round(min(sd["fertility_min"], session_fertility_min),2))
+                    sd["fertility_max"] = float(round(max(sd["fertility_max"], session_fertility_max),2))
 
                     # 3) persist everything
                     save_save_data(save_data)
@@ -1312,6 +1524,9 @@ def run_game():
                 session_size_max   = max(session_size_max, p.size)
                 session_vision_min = min(session_vision_min, p.vision_distance)
                 session_vision_max = max(session_vision_max, p.vision_distance)
+                session_fertility_max = max(session_fertility_max, p.fertility)
+                session_fertility_min = min(session_fertility_min, p.fertility)
+                
             prey_group.update()
             plant_group.update()
 

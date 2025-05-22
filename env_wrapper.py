@@ -114,13 +114,16 @@ class Env:
         r_pred = +0.4
         # detect if prey was killed this step:
         if not self.prey.alive():
-            r_pred += 85
+            r_pred += 80
         if not self.pred.alive():
             r_pred -= 100
         if self.pred.children_count > pred_prev_children:
             r_pred += 10 * (self.pred.children_count - pred_prev_children)
         if self.pred.age_seconds >= PREDATOR_REPRO_AGE and self.pred.action != 4 and self.pred.hunger >= self.pred.max_hunger/2:
             r_pred -= 0.001 * self.pred.hunger
+        
+        if self.pred.action != 2 and self.pred.detect_prey([self.prey]):
+            r_pred += 2
         
         if pred_action == 2 and visible: r_pred += 1.0
         elif pred_action == 2 and not visible: r_pred -= 1
@@ -130,7 +133,7 @@ class Env:
         new_dist = math.hypot(dx2, dy2)
         delta = self._last_dist - new_dist
         if pred_action == 2:
-            r_pred += 0.3 * delta
+            r_pred += 0.4 * delta
         self._last_dist = new_dist
         
         r_pred -= 0.05 * ((self.pred.max_hunger - self.pred.hunger) / self.pred.max_hunger)

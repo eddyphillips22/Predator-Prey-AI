@@ -1,4 +1,4 @@
-slot,used,XP,size_min,size_max,vision_min,vision_max
-1,True,113,1,58,35,380
-2,False,0,10,13,110,140
-3,False,0,10,13,110,140
+slot,used,XP,size_min,size_max,vision_min,vision_max,fertility_min,fertility_max
+1,True,0,10,13,110,140,0.8,1
+2,True,347,2,25,20,251,0.0,26.11
+3,True,22,5,17,54,203,0.8,1.1
