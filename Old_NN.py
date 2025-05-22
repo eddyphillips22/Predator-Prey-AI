@@ -205,8 +205,6 @@ def prey_run(norm_pred_dist, norm_hunger):
     return out[0,0]
 
 
-prey_train()
-
 
 
 

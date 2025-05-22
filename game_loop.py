@@ -16,6 +16,7 @@ FULL_GROWTH_AGE = 3.0 * YEAR_LENGTH
 MAX_AGE = 20.0 * YEAR_LENGTH
 MAX_PREDATORS = 50
 MAX_PREY      = 100
+PREDATOR_EAT_RANGE = 15
 DEFAULT_SLOT = {
     "used":       False,
     "XP":         0,
@@ -80,6 +81,13 @@ time_multiplier = 1.0
 font            = pygame.font.SysFont(None, 24)
 title_font     = pygame.font.SysFont(None, 48)
 spectate_target = None
+player_controlled = None
+controlling_mode = False
+move_x       = 0
+move_y       = 0
+sprinting    = False
+trying_eat     = False
+trying_reproduce = False
 zoom_level     = 1.0
 cam_offset_x    = 0
 cam_offset_y    = 0
@@ -98,6 +106,7 @@ tunnel_speed      = 1.2
 tunnel_spacing    = 40   
 tunnel_line_width = 2      
 tunnel_color      = (60,60,60)
+end_screen_stats = {}
 
 # // UNIVERSAL FUNCTIONS \\ #
 def get_world_coords(mx, my):
@@ -411,10 +420,62 @@ class predator(pygame.sprite.Sprite):
 
 
     def update(self):
-        branch = "chase" if (self.chasing and self.target_prey) else \
-            "reproduce" if (self.action == REPRODUCE) else \
-            "wander"   # our “else” case
-        print(f"[DEBUG] Predator {self.name} doing branch={branch}, action={self.action}")
+        global controlling_mode, player_controlled, spectate_target, zoom_level
+        self.age_seconds += time_multiplier * (1/60)
+        self.update_growth_stats()
+        if self.age_seconds >= MAX_AGE:
+            if self == player_controlled:
+                controlling_mode = False
+                spectate_target = None
+                zoom_level = 1.0
+                player_controlled = None
+            self.kill()
+            return
+        if self.hunger <= 0:
+            if self == player_controlled:
+                controlling_mode = False
+                spectate_target = None
+                zoom_level = 1.0
+                player_controlled = None
+            self.kill()
+            return
+        if controlling_mode and self is player_controlled:
+            if not self.alive():
+                controlling_mode = False
+                spectate_target = None
+                zoom_level = 1.0
+                player_controlled = None
+            speed = self.max_chase_speed if sprinting else self.base_speed
+            if sprinting:
+                self.hunger -= speed * self.energy_usage * 2.5 * time_multiplier
+            else:
+                self.hunger -= speed * self.energy_usage * 1.5 * time_multiplier
+            self.x += move_x * speed * time_multiplier
+            self.y += move_y * speed * time_multiplier
+            if move_x != 0 or move_y != 0:
+                self.angle = math.atan2(move_y, move_x)
+            if trying_eat:
+                if isinstance(self, predator):
+                    for prey in prey_group:
+                        dx = prey.x - self.x
+                        dy = prey.y - self.y
+                        dist = math.hypot(dx, dy)
+                        if dist < PREDATOR_EAT_RANGE:
+                            prey.kill()
+                            self.hunger = self.max_hunger
+                            break
+            if trying_reproduce:
+                if isinstance(self, predator):
+                    if self.age_seconds >= PREDATOR_REPRO_AGE and self.hunger >= self.max_hunger / 2:
+                        self.hunger -= self.max_hunger / 3
+                        for child in self.reproduce():
+                            predator_group.add(child)
+                        
+            self.x = max(10, min(screen_width-10, self.x))
+            self.y = max(10, min(screen_height-10, self.y))
+            self.rect.center = (int(self.x), int(self.y))
+            return
+            
         if hasattr(self, 'just_spawned') and self.just_spawned:
             self.action = WANDER
             self.moving = True
@@ -425,14 +486,6 @@ class predator(pygame.sprite.Sprite):
             self.direction_y = math.sin(ang)
             del self.just_spawned
                         
-        self.age_seconds += time_multiplier * (1/60)
-        self.update_growth_stats()
-        if self.age_seconds >= MAX_AGE:
-            self.kill()
-            return
-        if self.hunger <= 0:
-            self.kill()
-            return
 
         if self.chasing and self.target_prey:
             dx = self.target_prey.x - self.x
@@ -522,6 +575,39 @@ class predator(pygame.sprite.Sprite):
                 pygame.draw.line(surface, (255,0,0),
                                 (int(self.x),int(self.y)),
                                 (int(prey_obj.x),int(prey_obj.y)), 1)
+
+
+    def draw_vision_mask(self, screen):
+        # pull in your camera/zoom globals
+        global cam_offset_x, cam_offset_y, zoom_level
+
+        # 1) Compute the world‐to‐screen transform for the apex
+        sx = int(self.x * zoom_level + cam_offset_x)
+        sy = int(self.y * zoom_level + cam_offset_y)
+
+        # 2) Scale vision_distance by zoom as well
+        sd = self.vision_distance * zoom_level
+
+        half = self.fov / 2
+        # 3) Compute screen‐space cone edges
+        left = (
+            int(sx + math.cos(self.angle - half) * sd),
+            int(sy + math.sin(self.angle - half) * sd)
+        )
+        right = (
+            int(sx + math.cos(self.angle + half) * sd),
+            int(sy + math.sin(self.angle + half) * sd)
+        )
+
+        # 4) Build the overlay and darken it
+        mask = pygame.Surface((screen_width, screen_height), pygame.SRCALPHA)
+        mask.fill((0, 0, 0, 240))
+
+        # 5) Punch out your triangle _in screen coords_
+        pygame.draw.polygon(mask, (0,0,0,0), [(sx, sy), left, right])
+
+        # 6) Blit on top
+        screen.blit(mask, (0,0))
 
 
 class prey(pygame.sprite.Sprite):
@@ -1058,6 +1144,9 @@ def blit_world_with_camera():
     )
     screen.blit(scaled, (cam_offset_x, cam_offset_y))
     
+
+
+
 def draw_spectate_panel():
     panel = pygame.Surface((200,100), pygame.SRCALPHA)
     panel.fill((0,0,0,180))
@@ -1122,6 +1211,10 @@ def create_endscreen_ui():
     txt = font.render("Restart", True, (255,255,255))
     screen.blit(txt, (start_button.x + (start_button.width - txt.get_width())//2,
                     start_button.y + (start_button.height - txt.get_height())//2))
+    
+    for key, value in end_screen_stats.items():
+        txt = font.render(f"{key} {value}", True, (255,255,255))
+        screen.blit(txt, (screen_width - 220, 200 + 20*list(end_screen_stats.keys()).index(key)))
     
 def create_pregame_ui():
     # 1) background
@@ -1339,7 +1432,12 @@ frame_counter       = 0
 
 # // MAIN LOOP \\ #
 def run_game():
-    global time_multiplier, spectate_target, zoom_level, show_debug, show_vision, show_flightzone, predator_base_size, predator_vision_distance, dragging_size_slider, gif_timer, gif_index, dragging_vision_slider, predator_counts, prey_counts, time_steps, plant_spawn_timer, active_save_slot, message, predator_fertility, dragging_fertility_slider
+    global time_multiplier, spectate_target, zoom_level, show_debug, show_vision 
+    global show_flightzone, predator_base_size, predator_vision_distance, dragging_size_slider
+    global gif_timer, gif_index, dragging_vision_slider, predator_counts, prey_counts 
+    global time_steps, plant_spawn_timer, active_save_slot, message, predator_fertility
+    global dragging_fertility_slider, end_screen_stats, player_controlled, controlling_mode
+    global move_x, move_y, sprinting, trying_eat, trying_reproduce
 
     # now define your own counter for this run
     frame_counter = 0
@@ -1354,10 +1452,29 @@ def run_game():
                     if event.key == pygame.K_ESCAPE:
                         spectate_target = None
                         zoom_level = 1.0
+                        player_controlled = None
+                        controlling_mode   = False
                     elif event.key == pygame.K_LEFT:
                         time_multiplier = max(0.5, time_multiplier/2)
                     elif event.key == pygame.K_RIGHT:
                         time_multiplier = min(16, time_multiplier*2)
+                    elif event.key == pygame.K_c and spectate_target:
+                        player_controlled = spectate_target
+                        controlling_mode   = True
+                    if event.key in (pygame.K_a, pygame.K_LEFT):  move_x = -1
+                    if event.key in (pygame.K_d, pygame.K_RIGHT): move_x = +1
+                    if event.key in (pygame.K_w, pygame.K_UP):    move_y = -1
+                    if event.key in (pygame.K_s, pygame.K_DOWN):  move_y = +1
+                    if event.key == pygame.K_LSHIFT:              sprinting = True
+                    if event.key == pygame.K_e:                   trying_eat = True
+                    if event.key == pygame.K_r:                   trying_reproduce = True
+            elif event.type == pygame.KEYUP:
+                if currscreen == 'gamescreen':
+                    if event.key in (pygame.K_a, pygame.K_LEFT, pygame.K_d, pygame.K_RIGHT): move_x = 0
+                    if event.key in (pygame.K_w, pygame.K_UP,   pygame.K_s, pygame.K_DOWN):  move_y = 0
+                    if event.key == pygame.K_LSHIFT:             sprinting = False
+                    if event.key == pygame.K_e:                  trying_eat = False
+                    if event.key == pygame.K_r:                  trying_reproduce = False
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 mx,my = pygame.mouse.get_pos()
                 if currscreen == 'gamescreen':
@@ -1368,7 +1485,7 @@ def run_game():
                     elif speed_up_button.collidepoint((mx,my)):
                         time_multiplier = min(16, time_multiplier*2)
                     elif settings_button.collidepoint((mx,my)):
-                        currscreen = 'settings'
+                        currscreen = 'settings'                    
                 elif currscreen == 'settings':
                     if back_button.collidepoint((mx, my)):
                         currscreen = 'gamescreen'
@@ -1418,6 +1535,7 @@ def run_game():
                 elif currscreen == 'endscreen':
                     if start_button.collidepoint((mx, my)):
                         currscreen = 'pregame'
+                        end_screen_stats = {}
                         prey_group.empty()
                         predator_group.empty()
                         plant_group.empty()
@@ -1476,9 +1594,13 @@ def run_game():
                 if len(predator_group) == 0:
                     message = 'Predators have gone extinct!'
                     xp_gain = 1
+                    end_screen_stats['Pity XP:'] = 1
+                    end_screen_stats['Predators Left XP:'] = 0
                 else:
                     message = 'Prey have gone extinct!'
-                    xp_gain = len(predator_group)
+                    xp_gain = len(predator_group) + 1
+                    end_screen_stats['Pity XP:'] = 1
+                    end_screen_stats['Predators Left XP:'] = len(predator_group)
 
                 currscreen = 'endscreen'
 
@@ -1488,12 +1610,25 @@ def run_game():
                     sd["XP"] += xp_gain
 
                     # 2) merge session bounds into slot
-                    sd["size_min"]   = int(round(min(sd["size_min"],    session_size_min),0))
-                    sd["size_max"]   = int(round(max(sd["size_max"],    session_size_max),0))
+                    if session_vision_max > sd['vision_max']:
+                        end_screen_stats['New Max Vision:'] = session_vision_max
+                        
                     sd["vision_min"] = int(round(min(sd["vision_min"],  session_vision_min),0))
                     sd["vision_max"] = int(round(max(sd["vision_max"],  session_vision_max),0))
-                    sd["fertility_min"] = float(round(min(sd["fertility_min"], session_fertility_min),2))
-                    sd["fertility_max"] = float(round(max(sd["fertility_max"], session_fertility_max),2))
+                    
+                    if sd['XP'] >= 10:
+                        sd["size_min"]   = int(round(min(sd["size_min"],    session_size_min),0))
+                        sd["size_max"]   = int(round(max(sd["size_max"],    session_size_max),0))
+                        
+                        if session_size_max > sd['size_max']:
+                            end_screen_stats['New Max Size:'] = session_size_max
+                            
+                    if sd['XP'] >= 50:
+                        sd["fertility_min"] = float(round(min(sd["fertility_min"], session_fertility_min),2))
+                        sd["fertility_max"] = float(round(max(sd["fertility_max"], session_fertility_max),2))
+                        
+                        if session_fertility_max > sd['fertility_max']:
+                            end_screen_stats['New Max Fertility:'] = session_fertility_max  
 
                     # 3) persist everything
                     save_save_data(save_data)
@@ -1539,6 +1674,8 @@ def run_game():
                             if opt["label"]=="Show Flight Zone")["checked"]
             blit_world_with_camera()
             create_game_ui()
+            if controlling_mode and player_controlled:
+                player_controlled.draw_vision_mask(screen)
             if spectate_target:
                 draw_spectate_panel()
             simulation_seconds += (1/60) * time_multiplier
