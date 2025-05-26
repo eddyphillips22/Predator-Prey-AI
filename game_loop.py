@@ -17,6 +17,8 @@ MAX_AGE = 20.0 * YEAR_LENGTH
 MAX_PREDATORS = 50
 MAX_PREY      = 100
 PREDATOR_EAT_RANGE = 15
+VISION_UNLOCK_XP = 20
+FERTILITY_UNLOCK_XP = 150
 DEFAULT_SLOT = {
     "used":       False,
     "XP":         0,
@@ -40,25 +42,85 @@ screen_width  = 1100
 screen_height = 600
 screen        = pygame.display.set_mode((screen_width, screen_height))
 background = pygame.image.load("assets/background.png").convert()
+background_computer = pygame.image.load("assets/computer.png").convert()
+background_computer = pygame.transform.scale(
+                    background_computer,
+                    (screen_width * 1.3, screen_height * 1.3)
+                )
 background = pygame.transform.smoothscale(background,
                                         (screen_width, screen_height))
 active_save_slot = None
 
+from PIL import Image, ImageSequence
+import pygame
+
 def load_gif_frames(path):
+
     pil = Image.open(path)
+    print(f"[DEBUG] loading {path} → is_animated: {getattr(pil, 'is_animated', False)}, n_frames: {getattr(pil, 'n_frames', 1)}")
+    print(f"[DEBUG] pil.info keys: {pil.info}") 
     frames = []
+    durations = []
+
+    # how many frames in this GIF?
     try:
-        while True:
-            frame = pil.convert("RGBA")
-            data = frame.tobytes()
-            size = frame.size
-            surf = pygame.image.fromstring(data, size, "RGBA")
-            frames.append(surf)
-            pil.seek(pil.tell() + 1)
-    except EOFError:
-        pass
-    return frames
-gif_frames   = load_gif_frames("assets/title_background.gif")
+        total = pil.n_frames
+    except AttributeError:
+        total = 1
+
+    # keep a full RGBA canvas to composite “delta” frames
+    base = Image.new("RGBA", pil.size)
+
+    for i in range(total):
+        pil.seek(i)
+
+        # some GIFs only store the changed region – paste into base
+        frame = pil.convert("RGBA")
+        base.paste(frame, (0, 0), frame)
+
+        # convert to pygame Surface
+        surf = pygame.image.fromstring(base.tobytes(), base.size, "RGBA")
+        frames.append(surf)
+
+        # get this frame’s duration (ms), fallback to 100ms
+        dur_ms = pil.info.get("duration", 100)
+        durations.append(max(dur_ms, 20) / 1000.0)
+
+    return frames, durations
+
+def play_gif_sequence(paths):
+    """
+    Play each GIF (given by its file‐path) exactly once,
+    honouring each frame’s own duration, then return.
+    """
+    clock = pygame.time.Clock()
+
+    for path in paths:
+        frames, durations = load_gif_frames(path)
+        for frame_surf, dur in zip(frames, durations):
+            # how long (in ms) this frame should stay on screen
+            target_time = pygame.time.get_ticks() + int(dur * 1000)
+
+            while pygame.time.get_ticks() < target_time:
+                # 1) handle quit events so window remains responsive
+                for ev in pygame.event.get():
+                    if ev.type == pygame.QUIT:
+                        pygame.quit()
+                        return
+
+                # 2) draw this frame
+                screen.fill((0,0,0))
+                frame_surf = pygame.transform.scale(
+                    frame_surf,
+                    (476, 269)
+                )
+                screen.blit (background_computer, (screen_width // 2 - background_computer.get_width() // 2, screen_height // 2 - background_computer.get_height() // 2 + 100))
+                screen.blit(frame_surf, (screen_width // 2 - frame_surf.get_width() // 2 - 7, screen_height // 2 - frame_surf.get_height() // 2 - 72))
+                pygame.display.flip()
+
+                # 3) tick at 60fps so we don't peg the CPU
+                clock.tick(60)
+
 gif_index    = 0
 gif_timer    = 0
 GIF_FPS      = 60
@@ -1099,49 +1161,38 @@ def create_settings_ui():
         lbl = font.render(opt["label"], True, (255,255,255))
         screen.blit(lbl, (box.right+10, box.y+(box.height-lbl.get_height())//2))
         
-def blit_world_with_camera():
+def blit_world_with_camera(skip=(None)):
     """Draw the world to a temp surface, scale & blit it under camera."""
     global cam_offset_x, cam_offset_y
     # 1) draw into world_surf
     world_surf = background.copy()
     plant_group.draw(world_surf)
     for pr in prey_group:
-        pr.custom_draw(world_surf, show_flightzone)
+        if pr is not skip:
+            pr.custom_draw(world_surf, show_flightzone)
     for p in predator_group:
-        p.custom_draw(world_surf, prey_group, show_debug, show_vision)
+        if p is not skip:
+            p.custom_draw(world_surf, prey_group, show_debug, show_vision)
+        
 
     # 2) centre on spectate_target
-    if spectate_target:
-        cx, cy = spectate_target.x, spectate_target.y
+    target = player_controlled if controlling_mode and player_controlled else spectate_target
+    if target:
+        cx, cy = target.x, target.y
         cam_offset_x = screen_width/2  - cx * zoom_level
         cam_offset_y = screen_height/2 - cy * zoom_level
     else:
         cam_offset_x = cam_offset_y = 0
 
-    # 3) scale & blit
-    scaled = pygame.transform.smoothscale(
-        world_surf,
-        (int(screen_width*zoom_level), int(screen_height*zoom_level))
-    )
-    
     #clamp
-    scaled_w = int(screen_width * zoom_level)
-    scaled_h = int(screen_height * zoom_level)
-    
-    cam_offset_x = max(min(cam_offset_x, 0), screen_width  - scaled_w)
-    cam_offset_y = max(min(cam_offset_y, 0), screen_height - scaled_h)
-    
+    sw = int(screen_width * zoom_level)
+    sh = int(screen_height * zoom_level)
+    cam_offset_x = max(min(cam_offset_x, 0), screen_width  - sw)
+    cam_offset_y = max(min(cam_offset_y, 0), screen_height - sh)
     cam_offset_x = int(cam_offset_x)
     cam_offset_y = int(cam_offset_y)
     
-    screen.blit(scaled, (cam_offset_x, cam_offset_y))
-
-    # 4) scale & blit
-    scaled = pygame.transform.smoothscale(
-        world_surf, 
-        (int(screen_width * zoom_level),
-         int(screen_height * zoom_level))
-    )
+    scaled = pygame.transform.smoothscale(world_surf, (sw, sh))
     screen.blit(scaled, (cam_offset_x, cam_offset_y))
     
 
@@ -1313,25 +1364,25 @@ def create_pregame_ui():
 
     # --- Locks (also centred over their slider) ---
     lock = pygame.image.load("assets/locked.png").convert_alpha()
-    if sd['XP'] < 10:
+    if sd['XP'] < VISION_UNLOCK_XP:
         # draw lock above size slider
         lx = center_x - lock.get_width() // 2
         ly = size_slider_y - 32
         screen.blit(lock, (lx, ly))
         
-        txt = font.render(f"XP {sd['XP']}/10", True, (255,255,255))
+        txt = font.render(f"XP {sd['XP']}/{VISION_UNLOCK_XP}", True, (255,255,255))
         padding = 10
         txt_x = lx + lock.get_width() + padding
         lock_cy = ly + lock.get_height() // 2
         txt_y = lock_cy - txt.get_height() // 2
         screen.blit(txt, (txt_x, txt_y))
-    if sd['XP'] < 50:
+    if sd['XP'] < FERTILITY_UNLOCK_XP:
         # draw lock above fertility slider
         lx = center_x - lock.get_width() // 2
         ly = fertility_slider_y - 32
         screen.blit(lock, (lx, ly))
         
-        txt = font.render(f"XP {sd['XP']}/50", True, (255,255,255))
+        txt = font.render(f"XP {sd['XP']}/{FERTILITY_UNLOCK_XP}", True, (255,255,255))
         padding = 10
         txt_x = lx + lock.get_width() + padding
         lock_cy = ly + lock.get_height() // 2
@@ -1510,11 +1561,11 @@ def run_game():
                     vision_slider_rect = pygame.Rect(300, 220, 400, 20)
                     fertility_handle_rect = pygame.Rect(300, 380, 400, 20)
                     # slightly taller to make grabbing easier
-                    if size_slider_rect.collidepoint(mx, my) and active_save_slot is not None and save_data[active_save_slot]['XP'] >= 10:
+                    if size_slider_rect.collidepoint(mx, my) and active_save_slot is not None and save_data[active_save_slot]['XP'] >= VISION_UNLOCK_XP:
                         dragging_size_slider = True
                     elif vision_slider_rect.collidepoint(mx, my):   
                         dragging_vision_slider = True
-                    elif fertility_handle_rect.collidepoint(mx, my) and active_save_slot is not None and save_data[active_save_slot]['XP'] >= 50:
+                    elif fertility_handle_rect.collidepoint(mx, my) and active_save_slot is not None and save_data[active_save_slot]['XP'] >= FERTILITY_UNLOCK_XP:
                         dragging_fertility_slider = True
                     elif start_button.collidepoint((mx, my)):
                         currscreen = 'gamescreen'
@@ -1546,7 +1597,14 @@ def run_game():
                             if save_data[idx]['used'] == False:
                                 save_data[idx]['used'] = True
                                 save_save_data(save_data)
+                                play_gif_sequence([
+                                    "assets/story_scene1.gif",
+                                    "assets/story_scene2.gif"
+                                ])
                             active_save_slot = idx
+                            predator_vision_distance = save_data[idx]["vision_min"]
+                            predator_base_size = save_data[idx]["size_min"]
+                            predator_fertility = save_data[idx]["fertility_min"]
                             currscreen = 'title'
                     for idx, btn in enumerate(delete_save_button, start=1):
                         if btn.collidepoint((mx, my)):
@@ -1616,14 +1674,14 @@ def run_game():
                     sd["vision_min"] = int(round(min(sd["vision_min"],  session_vision_min),0))
                     sd["vision_max"] = int(round(max(sd["vision_max"],  session_vision_max),0))
                     
-                    if sd['XP'] >= 10:
+                    if sd['XP'] >= VISION_UNLOCK_XP:
                         sd["size_min"]   = int(round(min(sd["size_min"],    session_size_min),0))
                         sd["size_max"]   = int(round(max(sd["size_max"],    session_size_max),0))
                         
                         if session_size_max > sd['size_max']:
                             end_screen_stats['New Max Size:'] = session_size_max
                             
-                    if sd['XP'] >= 50:
+                    if sd['XP'] >= FERTILITY_UNLOCK_XP:
                         sd["fertility_min"] = float(round(min(sd["fertility_min"], session_fertility_min),2))
                         sd["fertility_max"] = float(round(max(sd["fertility_max"], session_fertility_max),2))
                         
@@ -1672,10 +1730,47 @@ def run_game():
                             if opt["label"]=="Enable Chase Lines")["checked"]
             show_flightzone = next(opt for opt in settings_checkboxes
                             if opt["label"]=="Show Flight Zone")["checked"]
-            blit_world_with_camera()
-            create_game_ui()
+            blit_world_with_camera(skip=player_controlled)
             if controlling_mode and player_controlled:
                 player_controlled.draw_vision_mask(screen)
+                sx = int(player_controlled.x * zoom_level + cam_offset_x)
+                sy = int(player_controlled.y * zoom_level + cam_offset_y)
+                deg = -math.degrees(player_controlled.angle) - 90
+                rotated = pygame.transform.rotate(player_controlled.original_image, deg)
+                w, h = rotated.get_size()
+                surf = pygame.transform.smoothscale(rotated, (int(w * zoom_level), int(h * zoom_level)))
+                rect = surf.get_rect(center=(sx, sy))
+                screen.blit(surf, rect)
+                
+                if show_debug:
+                    for prey in prey_group:
+                        px = int(prey.x * zoom_level + cam_offset_x)
+                        py = int(prey.y * zoom_level + cam_offset_y)
+                        pygame.draw.line(screen, (60,60,60), (sx, sy), (px, py), 1)
+                
+                if show_vision:
+                    # screen‐space vision cone points
+                    vd   = player_controlled.vision_distance * zoom_level
+                    half = player_controlled.fov / 2
+                    a    = player_controlled.angle
+
+                    left = (
+                        int(sx + math.cos(a - half) * vd),
+                        int(sy + math.sin(a - half) * vd)
+                    )
+                    right = (
+                        int(sx + math.cos(a + half) * vd),
+                        int(sy + math.sin(a + half) * vd)
+                    )
+
+                    pygame.draw.polygon(
+                        screen,
+                        (200,200,200),
+                        [(sx, sy), left, right],
+                        1
+                    )
+                
+            create_game_ui()
             if spectate_target:
                 draw_spectate_panel()
             simulation_seconds += (1/60) * time_multiplier
