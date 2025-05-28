@@ -47,15 +47,6 @@ class AgentNet(nn.Module):
         x = F.relu(self.fc2(x))
         return self.out(x)
 
-# ————— Dummy Env Wrapper —————
-# You need to write `Env.step(pred_action, prey_action)` which:
-#  - applies those actions to your predator/prey,
-#  - steps one frame of your Game Loop’s update(),
-#  - returns (pred_state_next, prey_state_next, r_pred, r_prey, done_flag).
-#
-# And Env.reset() should re-spawn everything. For brevity, that wrapper
-# is omitted here—but you’ll link into your existing Game Loop code.
-
 from env_wrapper import Env
 def dqn_update(net, opt, batch, gamma):
     # 1) unpack

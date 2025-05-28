@@ -145,6 +145,22 @@ title_font     = pygame.font.SysFont(None, 48)
 spectate_target = None
 player_controlled = None
 controlling_mode = False
+play_tutorial = False
+tutorial_sentence_idx = 0 
+tutorial_letter_idx   = 0
+paused_until_space    = False 
+typing_interval       = 3
+tutorial_sentences = ["You have escaped the evil scientists!", 
+                        "You are now stuck on the poorly sanitized floor of a lab.",
+                        "You must survive and thrive in this hostile environment.",
+                        "Begin by setting the stats of your predators",
+                        "You can only control their vision at the moment",
+                        "But gain more XP to unlock more stats to change.",
+                        "The Minimum and Maximum values will increase or decrease over time.",
+                        "This is based on the highest or lowest value that you acheive in the game",
+                        "Now get to eating!"
+                        
+]
 move_x       = 0
 move_y       = 0
 sprinting    = False
@@ -1209,7 +1225,17 @@ def draw_spectate_panel():
     screen.blit(font.render(f"Current Age: {round((spectate_target.age_seconds / YEAR_LENGTH), 1)}", True, (255,255,255)), (20,100))
     screen.blit(font.render(f"Pos: ({spectate_target.x:.1f},{spectate_target.y:.1f})", True, (200,200,200)), (20,120))
     screen.blit(font.render(f"Currently Spectating: {spectate_target.name}", True, (255,255,255)), (400,40))
-
+    pygame.draw.rect(screen, (0,0,0), c_key_rect,2)
+    screen.blit(c_key, c_key_rect.topleft)
+    screen.blit(font.render("Control", True, (255,255,255)), (c_key_rect.x + c_key_rect.width + 10, c_key_rect.y + 5))
+    if player_controlled:
+        pygame.draw.rect(screen, (0,0,0), e_key_rect,2)
+        screen.blit(e_key, e_key_rect.topleft)
+        screen.blit(font.render("Eat", True, (255,255,255)), (e_key_rect.x + e_key_rect.width + 10, e_key_rect.y + 5))
+        pygame.draw.rect(screen, (0,0,0), r_key_rect,2)
+        screen.blit(r_key, r_key_rect.topleft)
+        screen.blit(font.render("Reproduce", True, (255,255,255)), (r_key_rect.x + r_key_rect.width + 10, r_key_rect.y + 5))
+        pass
 def create_title_ui():
     create_tunnel_background()
     title = title_font.render("Predator / Prey Simulation", True, (255,255,255))
@@ -1434,6 +1460,16 @@ def create_save_file_ui():
                 ))
     # Back button
 
+def create_tutorial_ui(text):
+    # translucent overlay
+    overlay = pygame.Surface((screen_width, screen_height), pygame.SRCALPHA)
+    overlay.fill((0,0,0,180))
+    screen.blit(overlay, (0,0))
+    # draw the slice of text
+    surf = font.render(text, True, (255,255,255))
+    rect = surf.get_rect(center=(screen_width//2, screen_height//2))
+    screen.blit(surf, rect)
+    screen.blit(font.render("Press Space to continue...", True, (255,255,255)), (screen_width//2 - 100, screen_height//2 + 250))
 
 
 # // SPRITE GROUPS \\ #
@@ -1442,6 +1478,8 @@ prey_group     = pygame.sprite.Group()
 plant_group    = pygame.sprite.Group()
 
 # // UI ELEMENTS \\ #
+button_key_box = pygame.Rect(10, 10, 25, 25)
+    
 fertility_handle_img = pygame.image.load("assets/fertility_handle.png").convert_alpha()
 fertility_handle_img = pygame.transform.smoothscale(
     fertility_handle_img,
@@ -1460,6 +1498,12 @@ start_button = start_image.get_rect(center=(
     screen_width//2,
     screen_height//2 + 200
 ))
+c_key = pygame.image.load("assets/C-Key.png").convert_alpha()
+c_key_rect = pygame.Rect(20, 230, 30, 30)
+r_key = pygame.image.load("assets/R-Key.png").convert_alpha()
+r_key_rect = pygame.Rect(20, 190, 30, 30)
+e_key = pygame.image.load("assets/E-Key.png").convert_alpha()
+e_key_rect = pygame.Rect(20, 150, 30, 30)
 speed_up_button  = pygame.Rect(screen_width-100, screen_height-50, 90, 40)
 settings_button  = pygame.Rect(screen_width-100, 10, 90, 40)
 settings_button_title  = pygame.Rect(screen_width-100, 10, 90, 40)
@@ -1488,7 +1532,7 @@ def run_game():
     global gif_timer, gif_index, dragging_vision_slider, predator_counts, prey_counts 
     global time_steps, plant_spawn_timer, active_save_slot, message, predator_fertility
     global dragging_fertility_slider, end_screen_stats, player_controlled, controlling_mode
-    global move_x, move_y, sprinting, trying_eat, trying_reproduce
+    global move_x, move_y, sprinting, trying_eat, trying_reproduce, play_tutorial
 
     # now define your own counter for this run
     frame_counter = 0
@@ -1556,7 +1600,7 @@ def run_game():
                     elif back_button.collidepoint((mx, my)):
                         currscreen = 'savefiles'
                         active_save_slot = None
-                elif currscreen == "pregame":
+                elif currscreen == "pregame" and not play_tutorial:
                     size_slider_rect = pygame.Rect(300, 300, 400, 20)
                     vision_slider_rect = pygame.Rect(300, 220, 400, 20)
                     fertility_handle_rect = pygame.Rect(300, 380, 400, 20)
@@ -1595,6 +1639,10 @@ def run_game():
                     for idx, btn in enumerate(save_file_buttons, start=1):
                         if btn.collidepoint((mx, my)):
                             if save_data[idx]['used'] == False:
+                                play_tutorial = True
+                                tutorial_sentence_idx = 0
+                                tutorial_letter_idx   = 0
+                                paused_until_space    = False
                                 save_data[idx]['used'] = True
                                 save_save_data(save_data)
                                 play_gif_sequence([
@@ -1602,9 +1650,9 @@ def run_game():
                                     "assets/story_scene2.gif"
                                 ])
                             active_save_slot = idx
-                            predator_vision_distance = save_data[idx]["vision_min"]
-                            predator_base_size = save_data[idx]["size_min"]
-                            predator_fertility = save_data[idx]["fertility_min"]
+                            predator_vision_distance = save_data[idx]["vision_min"] + int(round(save_data[idx]["vision_max"] /2))
+                            predator_base_size = save_data[idx]["size_min"] + int(round(save_data[idx]["size_max"] /2))
+                            predator_fertility = save_data[idx]["fertility_min"] + int(round(save_data[idx]["fertility_max"] /2))
                             currscreen = 'title'
                     for idx, btn in enumerate(delete_save_button, start=1):
                         if btn.collidepoint((mx, my)):
@@ -1613,13 +1661,13 @@ def run_game():
                                 save_data[idx][key] = data[key]
                             save_save_data(save_data)
             elif event.type == pygame.MOUSEBUTTONUP:
-                if currscreen == 'pregame':
+                if currscreen == 'pregame' and not play_tutorial:
                     dragging_vision_slider = False
                     dragging_size_slider = False
                     dragging_fertility_slider = False
             
             elif event.type == pygame.MOUSEMOTION:
-                if currscreen == 'pregame':
+                if currscreen == 'pregame' and not play_tutorial:
                     sd = save_data[active_save_slot]
                     if dragging_size_slider:
                         mx, my = pygame.mouse.get_pos()
@@ -1782,6 +1830,47 @@ def run_game():
             create_title_ui()
         
         elif currscreen == 'pregame':
+            if play_tutorial:
+                # — 1) catch Space/quit events —
+                for ev in pygame.event.get():
+                    if ev.type == pygame.QUIT:
+                        pygame.quit()
+                        return
+                    elif ev.type == pygame.KEYDOWN and ev.key == pygame.K_SPACE:
+                        sentence = tutorial_sentences[tutorial_sentence_idx]
+                        if tutorial_letter_idx < len(sentence):
+                            # skip to end of this line & pause
+                            tutorial_letter_idx = len(sentence)
+                            paused_until_space  = True
+                        else:
+                            # go to next sentence
+                            tutorial_sentence_idx += 1
+                            tutorial_letter_idx   = 0
+                            paused_until_space    = False
+                            if tutorial_sentence_idx >= len(tutorial_sentences):
+                                play_tutorial = False
+                                break
+
+                # — 2) auto-advance one letter every decision_interval frames —
+                if play_tutorial and not paused_until_space:
+                    if frame_counter % typing_interval == 0:
+                        sentence = tutorial_sentences[tutorial_sentence_idx]
+                        tutorial_letter_idx += 1
+                        if tutorial_letter_idx >= len(sentence):
+                            tutorial_letter_idx = len(sentence)
+                            paused_until_space  = True
+
+                # — 3) draw current slice & skip the rest of the loop —
+                if play_tutorial and tutorial_sentence_idx < len(tutorial_sentences):
+                    create_pregame_ui()
+                    create_tutorial_ui(
+                        tutorial_sentences[tutorial_sentence_idx][:tutorial_letter_idx]
+                    )
+                    pygame.display.flip()
+                    frame_counter += 1
+                    continue
+
+            # once play_tutorial is False, fall back to normal pregame UI
             create_pregame_ui()
             
         elif currscreen == 'endscreen':
