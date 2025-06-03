@@ -28,6 +28,15 @@ DEFAULT_SLOT = {
     "vision_max":140,
     "fertility_min": 0.8,
     "fertility_max": 1,
+    "achievment1": False,
+    "achievment2": False,
+    "achievment3": False,
+    "achievment4": False,
+    "achievment5": False,
+    "achievment6": False,
+    "achievment7": False,
+    "achievment8": False,
+    "games_played": 0
 }
 import AI
 import Old_NN
@@ -131,6 +140,7 @@ simulation_seconds = 0.0
 plant_spawn_timer = 0
 session_size_min = None
 session_size_max = None
+previous_page = None
 session_vision_min = None
 session_vision_max = None
 session_fertility_min = None
@@ -150,6 +160,8 @@ tutorial_sentence_idx = 0
 tutorial_letter_idx   = 0
 paused_until_space    = False 
 typing_interval       = 3
+achievements_scroll = 0
+SCROLL_SPEED = 12
 tutorial_sentences = ["You have escaped the evil scientists!", 
                         "You are now stuck on the poorly sanitized floor of a lab.",
                         "You must survive and thrive in this hostile environment.",
@@ -185,6 +197,32 @@ tunnel_spacing    = 40
 tunnel_line_width = 2      
 tunnel_color      = (60,60,60)
 end_screen_stats = {}
+achievement_labels = [
+    "First Steps (Complete 1 Simulation)",       # achievement1
+    "Swole AF (Unlock Size)",   # achievement2
+    "Big Ole Eye (Unlock Cyclops Predators)",          # achievement3
+    "Getting the Hang of it (Complete 5 Simulations)",         # achievement4
+    "Getting Frisky (Unlock Fertility)",        # achievement5
+    "Experienced (Complete 10 Simulations)",    # achievement6
+    "This One Looks a Little Funny? (Create a differently abled Predator)", # achievement7          
+    "Horde (Finish with over 50 predators)"          # achievement8
+]
+achievement_icons = {
+    1: "assets/bronze_shoe.png",
+    2: "assets/size_handle.png",
+    3: "assets/cyclopspred.png",
+    4: "assets/silver_shoe.png",
+    5: "assets/fertility_handle.png",
+    6: "assets/gold_shoe.png",
+    7: "assets/disabledpred.png",
+    8: "assets/horde.png"
+}
+loaded_icons = {}
+for idx, path in achievement_icons.items():
+    img = pygame.image.load(path).convert_alpha()
+    loaded_icons[idx] = img
+just_unlocked = None
+POPUP_DURATION_MS = 1500 
 
 # // UNIVERSAL FUNCTIONS \\ #
 def get_world_coords(mx, my):
@@ -208,7 +246,7 @@ def handle_spectate_click(mx, my):
 def load_save_data():
     # If missing, create a fresh file with three default slots
     if not os.path.exists(SAVE_FILE_PATH):
-        data = {i: DEFAULT_SLOT.copy() for i in (1,2,3)}
+        data = {i: DEFAULT_SLOT.copy()}
         save_save_data(data)
         return data
 
@@ -226,6 +264,16 @@ def load_save_data():
                 "vision_max": int(row["vision_max"]),
                 "fertility_min": float(row["fertility_min"]),
                 "fertility_max": float(row["fertility_max"]),
+                "achievment1": row['achievment1'].lower() == "true",
+                "achievment2": row['achievment2'].lower() == "true",
+                "achievment3": row['achievment3'].lower() == "true",
+                "achievment4": row['achievment4'].lower() == "true",
+                "achievment5": row['achievment5'].lower() == "true",
+                "achievment6": row['achievment6'].lower() == "true",
+                "achievment7": row['achievment7'].lower() == "true",
+                "achievment8": row['achievment8'].lower() == "true",
+                "games_played": int(row["games_played"])
+                
             }
 
     # Ensure every slot 1–3 exists
@@ -243,7 +291,12 @@ def save_save_data(data):
             "slot","used","XP",
             "size_min","size_max",
             "vision_min","vision_max",
-            "fertility_min","fertility_max"
+            "fertility_min","fertility_max",
+            "achievment1", "achievment2", 
+            "achievment3", "achievment4", 
+            "achievment5", "achievment6", 
+            "achievment7", "achievment8",
+            "games_played"
         ])
         for slot in (1,2,3):
             sd = data.get(slot, DEFAULT_SLOT)
@@ -256,18 +309,22 @@ def save_save_data(data):
                 sd["vision_min"],
                 sd["vision_max"],
                 sd["fertility_min"],
-                sd["fertility_max"]
+                sd["fertility_max"],
+                sd["achievment1"],
+                sd["achievment2"],
+                sd["achievment3"],
+                sd["achievment4"],
+                sd["achievment5"],
+                sd["achievment6"],
+                sd["achievment7"],
+                sd["achievment8"],
+                sd["games_played"]
             ])
 
 # Global save state
 save_data = load_save_data()
 
 def create_tunnel_background():
-    """
-    Call once per frame when on the title screen.
-    Fills the screen black, then draws concentric circle outlines
-    whose radii march outward to simulate flying through a tunnel.
-    """
     global tunnel_offset
 
     # 1) Black background
@@ -355,6 +412,11 @@ class predator(pygame.sprite.Sprite):
         # sprite image
         if self.vision_distance > 270:
             self.image = pygame.image.load("assets/cyclopspred.png").convert_alpha()
+            if save_data[active_save_slot]['achievment3'] is False:
+                save_data[active_save_slot]['achievment3'] = True
+                global just_unlocked
+                just_unlocked = (3, pygame.time.get_ticks())
+                save_save_data(save_data)
         elif self.disabled:
             self.image = pygame.image.load("assets/disabledpred.png").convert_alpha()
         else:
@@ -445,6 +507,7 @@ class predator(pygame.sprite.Sprite):
         self.action = action
     
     def reproduce(self):
+        global just_unlocked
         children = []
         f = self.fertility
         base = int(f)
@@ -460,6 +523,10 @@ class predator(pygame.sprite.Sprite):
             disabled = (random.random() < disabled_chance)
             if disabled:
                 print(f"[DEBUG] Predator {self.name} disabled child")
+                if save_data[active_save_slot]['achievment7'] is False:
+                    save_data[active_save_slot]['achievment7'] = True
+                    just_unlocked = (7, pygame.time.get_ticks())
+                    save_save_data(save_data)
             child = predator(self.x, self.y)
             for attr in ('size', 'base_speed', 'max_hunger', 'energy_usage', 'fov',
                         'vision_distance', 'max_chase_speed', 'chase_acceleration'):
@@ -918,11 +985,6 @@ class prey(pygame.sprite.Sprite):
         return children
 
     def update(self):
-        branch = "Flee" if (self._flee_target and self.flee_score > 0.5) else \
-            "reproduce" if (self.action == P_REPRODUCE) else \
-            "wander"   # our “else” case
-        print(f"[DEBUG] Prey {self.name} doing branch={branch}, action={self.action}")
-        # starvation
         if hasattr(self, 'just_spawned') and self.just_spawned:
             self.action = WANDER
             self.moving = True
@@ -1236,6 +1298,7 @@ def draw_spectate_panel():
         screen.blit(r_key, r_key_rect.topleft)
         screen.blit(font.render("Reproduce", True, (255,255,255)), (r_key_rect.x + r_key_rect.width + 10, r_key_rect.y + 5))
         pass
+
 def create_title_ui():
     create_tunnel_background()
     title = title_font.render("Predator / Prey Simulation", True, (255,255,255))
@@ -1264,6 +1327,10 @@ def create_title_ui():
     txt = font.render("Back", True, (255,255,255))
     screen.blit(txt, (back_button.x + (back_button.width - txt.get_width())//2,
                     back_button.y + (back_button.height - txt.get_height())//2))
+    
+    pygame.draw.rect(screen, (50,50,50), achievment_rect)
+    pygame.draw.rect(screen, (200,200,200), achievment_rect, 2)
+    screen.blit(achievement_img, (achievment_rect.x + 5, achievment_rect.y + 5))
 
 
 def spawn_initial_sprites():
@@ -1294,6 +1361,7 @@ def create_endscreen_ui():
         screen.blit(txt, (screen_width - 220, 200 + 20*list(end_screen_stats.keys()).index(key)))
     
 def create_pregame_ui():
+    global just_unlocked
     # 1) background
     create_tunnel_background()
 
@@ -1402,6 +1470,10 @@ def create_pregame_ui():
         lock_cy = ly + lock.get_height() // 2
         txt_y = lock_cy - txt.get_height() // 2
         screen.blit(txt, (txt_x, txt_y))
+    else:
+        if sd['achievment2'] == False:
+            sd['achievment2'] = True
+            save_save_data(save_data)
     if sd['XP'] < FERTILITY_UNLOCK_XP:
         # draw lock above fertility slider
         lx = center_x - lock.get_width() // 2
@@ -1414,12 +1486,31 @@ def create_pregame_ui():
         lock_cy = ly + lock.get_height() // 2
         txt_y = lock_cy - txt.get_height() // 2
         screen.blit(txt, (txt_x, txt_y))
+    else:
+        if sd['achievment5'] == False:
+            sd['achievment5'] = True
+            save_save_data(save_data)
     # back button
     pygame.draw.rect(screen, (50,50,50), back_button)
     pygame.draw.rect(screen, (255,255,255), back_button, 2)
     txt = font.render("Back", True, (255,255,255))
     screen.blit(txt, (back_button.x + (back_button.width - txt.get_width())//2,
                     back_button.y + (back_button.height - txt.get_height())//2))
+    
+    pygame.draw.rect(screen, (50,50,50), achievment_rect)
+    pygame.draw.rect(screen, (200,200,200), achievment_rect, 2)
+    screen.blit(achievement_img, (achievment_rect.x + 5, achievment_rect.y + 5))
+
+def create_tutorial_ui(text):
+    # translucent overlay
+    overlay = pygame.Surface((screen_width, screen_height), pygame.SRCALPHA)
+    overlay.fill((0,0,0,180))
+    screen.blit(overlay, (0,0))
+    # draw the slice of text
+    surf = font.render(text, True, (255,255,255))
+    rect = surf.get_rect(center=(screen_width//2, screen_height//2))
+    screen.blit(surf, rect)
+    screen.blit(font.render("Press Space to continue...", True, (255,255,255)), (screen_width//2 - 100, screen_height//2 + 250))
 
 def create_save_file_ui():
     create_tunnel_background()
@@ -1427,24 +1518,24 @@ def create_save_file_ui():
     screen.blit(title, (screen_width//2 - title.get_width()//2, 100))
     # Draw slot buttons
     for idx, btn in enumerate(save_file_buttons, start=1):
-        pygame.draw.rect(screen, (50,50,50), btn)
-        pygame.draw.rect(screen, (255,255,255), btn, 2)
+        pygame.draw.rect(screen, (0,0,0), btn, 1)
+        screen.blit(test_tube, (btn.x, btn.y))
         if save_data[idx]['used']:
             label = f"XP: {save_data[idx]['XP']}"
-            txt = font.render(label, True, (255,255,255))
+            txt = font.render(label, True, (0,0,0))
             screen.blit(txt, (
                 btn.x + (btn.width - txt.get_width())//2,
                 btn.y + (btn.height - txt.get_height())//2 + 10
             ))
-            label = f"Save file {idx}" if save_data[idx]['used'] else "No save file"
-            txt = font.render(label, True, (255,255,255))
+            label = f"Experiment {idx}" if save_data[idx]['used'] else "Start Experiment"
+            txt = font.render(label, True, (0,0,0))
             screen.blit(txt, (
                 btn.x + (btn.width - txt.get_width())//2,
                 btn.y + (btn.height - txt.get_height())//2 - 10
             ))
         else:
-            label = f"Save file {idx}" if save_data[idx]['used'] else "No save file"
-            txt = font.render(label, True, (255,255,255))
+            label = f"Experiment {idx}" if save_data[idx]['used'] else "Start Experiment"
+            txt = font.render(label, True, (0,0,0))
             screen.blit(txt, (
                 btn.x + (btn.width - txt.get_width())//2,
                 btn.y + (btn.height - txt.get_height())//2
@@ -1460,16 +1551,141 @@ def create_save_file_ui():
                 ))
     # Back button
 
-def create_tutorial_ui(text):
-    # translucent overlay
-    overlay = pygame.Surface((screen_width, screen_height), pygame.SRCALPHA)
-    overlay.fill((0,0,0,180))
-    screen.blit(overlay, (0,0))
-    # draw the slice of text
-    surf = font.render(text, True, (255,255,255))
-    rect = surf.get_rect(center=(screen_width//2, screen_height//2))
-    screen.blit(surf, rect)
-    screen.blit(font.render("Press Space to continue...", True, (255,255,255)), (screen_width//2 - 100, screen_height//2 + 250))
+def create_achievements_ui():
+    """
+    Draw the achievements list. Whenever save_data[active_save_slot][f'achievment{i}'] 
+    is True, we draw that achievement’s icon;
+    otherwise draw a question‐mark. Also handle a quick “unlocked” popup.
+    """
+    global just_unlocked
+
+    screen.fill((30, 30, 30))  # dark background
+
+    # 1) Draw a translucent black bar behind the title:
+    title_background = pygame.Surface((screen_width, 60), pygame.SRCALPHA)
+    title_background.fill((0, 0, 0, 160))  # RGBA with alpha=160
+    screen.blit(title_background, (0, 0))
+
+    # 2) Draw “Achievements” text on top:
+    title = title_font.render("Achievements", True, (255, 255, 255))
+    screen.blit(
+        title,
+        (
+            (screen_width - title.get_width()) // 2,
+            (60 - title.get_height()) // 2
+        )
+    )
+
+    # 3) Draw Back button:
+    pygame.draw.rect(screen, (50, 50, 50), back_button)
+    pygame.draw.rect(screen, (255, 255, 255), back_button, 2)
+    back_txt = font.render("Back", True, (255, 255, 255))
+    screen.blit(
+        back_txt,
+        (
+            back_button.x + (back_button.width - back_txt.get_width()) // 2,
+            back_button.y + (back_button.height - back_txt.get_height()) // 2
+        )
+    )
+
+    # 4) List each achievement card
+    slot = save_data.get(active_save_slot, DEFAULT_SLOT)
+    y0 = 80 + achievements_scroll
+    h = 80
+    pad = 10
+
+    for i, label in enumerate(achievement_labels, start=1):
+        rect = pygame.Rect(20, y0, screen_width - 40, h)
+
+        # background box
+        pygame.draw.rect(screen, (50, 50, 50), rect)
+        pygame.draw.rect(screen, (200, 200, 200), rect, 2)
+
+        # icon square on the left
+        icon_size = h - 2 * pad
+        icon_rect = pygame.Rect(rect.x + pad, rect.y + pad, icon_size, icon_size)
+        pygame.draw.rect(screen, (80, 80, 80), icon_rect)
+
+        # check if unlocked:
+        unlocked = slot.get(f"achievment{i}", False)
+
+        if unlocked:
+            # draw the colored border:
+            pygame.draw.rect(screen, (0, 200, 0), rect, 2)
+
+            # load & scale this achievement’s icon
+            icon_surf = loaded_icons.get(i)
+            if icon_surf:
+                icon_surf = pygame.transform.smoothscale(icon_surf, (icon_size - 10, icon_size - 10))
+                screen.blit(
+                    icon_surf,
+                    (
+                        icon_rect.x + (icon_size - icon_surf.get_width()) // 2,
+                        icon_rect.y + (icon_size - icon_surf.get_height()) // 2
+                    )
+                )
+            else:
+                # if you ever forgot to put a PNG in the dict, fallback to a check‐mark
+                check_surf = font.render("✓", True, (0, 200, 0))
+                cx, cy = icon_rect.center
+                screen.blit(check_surf, (cx - check_surf.get_width() // 2, cy - check_surf.get_height() // 2))
+
+            # draw a label plus a small “unlocked” badge
+            txt = font.render(label, True, (255, 255, 255))
+            screen.blit(txt, (icon_rect.right + pad, rect.y + (h - txt.get_height()) // 2))
+
+        else:
+            # if still locked, draw a red border and a question‐mark
+            pygame.draw.rect(screen, (200, 0, 0), rect, 2)
+            qm = font.render("?", True, (200, 200, 200))
+            qx, qy = icon_rect.center
+            screen.blit(qm, (qx - qm.get_width() // 2, qy - qm.get_height() // 2))
+
+            # draw the label in grey to indicate locked
+            txt = font.render(label, True, (120, 120, 120))
+            screen.blit(txt, (icon_rect.right + pad, rect.y + (h - txt.get_height()) // 2))
+
+        y0 += h + pad
+
+
+    # 5) If we just unlocked something (within the last POPUP_DURATION_MS), draw a popup:
+
+def draw_achievement_popup():
+    """
+    If just_unlocked is (idx, start_ms) and we’re still within POPUP_DURATION_MS,
+    draw the “Achievement Unlocked!” overlay in the very center of the screen.
+    """
+    global just_unlocked
+
+    if just_unlocked is None:
+        return
+
+    ach_idx, start_ms = just_unlocked
+    elapsed = pygame.time.get_ticks() - start_ms
+    if elapsed >= POPUP_DURATION_MS:
+        just_unlocked = None
+        return
+
+    # dark translucent rectangle:
+    popup_surf = pygame.Surface((400, 100), pygame.SRCALPHA)
+    popup_surf.fill((0, 0, 0, 200))
+    screen.blit(
+        popup_surf,
+        ((screen_width - 400) // 2, (screen_height - 100) // 2)
+    )
+
+    # “Achievement Unlocked!” in gold
+    text1 = font.render("Achievement Unlocked!", True, (255, 215, 0))
+    text2 = font.render(achievement_labels[ach_idx - 1], True, (255, 215, 0))
+    screen.blit(
+        text1,
+        ((screen_width - text1.get_width()) // 2, (screen_height // 2) - 30)
+    )
+    screen.blit(
+        text2,
+        ((screen_width - text2.get_width()) // 2, (screen_height // 2) + 10)
+    )
+
 
 
 # // SPRITE GROUPS \\ #
@@ -1491,6 +1707,8 @@ size_handle_img = pygame.transform.smoothscale(
     (24, 24) 
 )
 vision_handle_img = pygame.image.load("assets/vision_handle2.png").convert_alpha()
+achievement_img = pygame.image.load("assets/trophy.png").convert_alpha()
+achievment_rect = pygame.Rect(10,10,50,50)
 track_img = pygame.image.load("assets/slider.png").convert_alpha()
 slow_down_button = pygame.Rect(screen_width-200, screen_height-50, 90, 40)
 start_image = pygame.image.load("assets/start_button2.png").convert_alpha()
@@ -1512,6 +1730,7 @@ restart_button = pygame.Rect(screen_width-100, screen_height-100, 90, 40)
 delete_save_button = [
     pygame.Rect(screen_width//2 + 160, 220 + (i-1)*100, 30, 30)
     for i in range(1, 4)]
+test_tube = pygame.image.load("assets/testtube.png").convert_alpha()
 save_file_buttons = [
     pygame.Rect(screen_width//2 - 150, 200 + (i-1)*100, 300, 70)
     for i in range(1, 4)]
@@ -1533,6 +1752,13 @@ def run_game():
     global time_steps, plant_spawn_timer, active_save_slot, message, predator_fertility
     global dragging_fertility_slider, end_screen_stats, player_controlled, controlling_mode
     global move_x, move_y, sprinting, trying_eat, trying_reproduce, play_tutorial
+    global achievements_scroll, SCROLL_SPEED, achievement_labels, previous_page, just_unlocked
+    num_items      = len(achievement_labels)         
+    item_h, pad    = 80, 10                          
+    y_start        = 80                              
+    content_height = num_items * item_h + (num_items - 1) * pad
+    min_scroll     = min(0, screen_height - (y_start + content_height))
+    max_scroll     = 0
 
     # now define your own counter for this run
     frame_counter = 0
@@ -1563,6 +1789,12 @@ def run_game():
                     if event.key == pygame.K_LSHIFT:              sprinting = True
                     if event.key == pygame.K_e:                   trying_eat = True
                     if event.key == pygame.K_r:                   trying_reproduce = True
+                elif currscreen == "achievments":
+                    if event.key == pygame.K_UP:
+                        achievements_scroll += SCROLL_SPEED
+                    elif event.key == pygame.K_DOWN:
+                        achievements_scroll -= SCROLL_SPEED
+                    achievements_scroll = max(min_scroll,min(max_scroll, achievements_scroll))
             elif event.type == pygame.KEYUP:
                 if currscreen == 'gamescreen':
                     if event.key in (pygame.K_a, pygame.K_LEFT, pygame.K_d, pygame.K_RIGHT): move_x = 0
@@ -1580,6 +1812,7 @@ def run_game():
                     elif speed_up_button.collidepoint((mx,my)):
                         time_multiplier = min(16, time_multiplier*2)
                     elif settings_button.collidepoint((mx,my)):
+                        previous_page = currscreen
                         currscreen = 'settings'                    
                 elif currscreen == 'settings':
                     if back_button.collidepoint((mx, my)):
@@ -1588,6 +1821,7 @@ def run_game():
                         if opt["rect"].collidepoint((mx, my)):
                             opt["checked"] = not opt["checked"]
                         if restart_button.collidepoint((mx, my)):
+                            previous_page = currscreen
                             currscreen = 'endscreen'
                             prey_group.empty()
                             predator_group.empty()
@@ -1596,10 +1830,23 @@ def run_game():
                             screen.fill((0,0,0))
                 elif currscreen == 'title':
                     if start_button.collidepoint((mx, my)):
+                        previous_page = currscreen
                         currscreen = 'pregame'
                     elif back_button.collidepoint((mx, my)):
+                        previous_page = currscreen
                         currscreen = 'savefiles'
                         active_save_slot = None
+                    elif achievment_rect.collidepoint((mx, my)):
+                        previous_page = currscreen
+                        currscreen = 'achievements'
+                elif currscreen == 'achievements':
+                    if event.button == 4:  # wheel up
+                        achievements_scroll += SCROLL_SPEED
+                    elif event.button == 5:  # wheel down
+                        achievements_scroll -= SCROLL_SPEED
+                    elif back_button.collidepoint((mx, my)):
+                        currscreen = previous_page
+                    achievements_scroll = max(min_scroll,min(max_scroll, achievements_scroll))
                 elif currscreen == "pregame" and not play_tutorial:
                     size_slider_rect = pygame.Rect(300, 300, 400, 20)
                     vision_slider_rect = pygame.Rect(300, 220, 400, 20)
@@ -1612,6 +1859,7 @@ def run_game():
                     elif fertility_handle_rect.collidepoint(mx, my) and active_save_slot is not None and save_data[active_save_slot]['XP'] >= FERTILITY_UNLOCK_XP:
                         dragging_fertility_slider = True
                     elif start_button.collidepoint((mx, my)):
+                        previous_page = currscreen
                         currscreen = 'gamescreen'
                         predator_counts = []
                         prey_counts = []
@@ -1626,9 +1874,14 @@ def run_game():
                         session_fertility_max = sd["fertility_max"]
                         spawn_initial_sprites()
                     elif back_button.collidepoint((mx, my)):
+                        previous_page = currscreen
                         currscreen = 'title'
+                    elif achievment_rect.collidepoint((mx, my)):
+                        previous_page = currscreen
+                        currscreen = 'achievements'
                 elif currscreen == 'endscreen':
                     if start_button.collidepoint((mx, my)):
+                        previous_page = currscreen
                         currscreen = 'pregame'
                         end_screen_stats = {}
                         prey_group.empty()
@@ -1653,13 +1906,18 @@ def run_game():
                             predator_vision_distance = save_data[idx]["vision_min"] + int(round(save_data[idx]["vision_max"] /2))
                             predator_base_size = save_data[idx]["size_min"] + int(round(save_data[idx]["size_max"] /2))
                             predator_fertility = save_data[idx]["fertility_min"] + int(round(save_data[idx]["fertility_max"] /2))
+                            previous_page = currscreen
                             currscreen = 'title'
+                        elif achievment_rect.collidepoint((mx, my)):
+                            previous_page = currscreen
+                            currscreen = 'achievements'
                     for idx, btn in enumerate(delete_save_button, start=1):
                         if btn.collidepoint((mx, my)):
                             data = DEFAULT_SLOT
                             for key in data:
                                 save_data[idx][key] = data[key]
                             save_save_data(save_data)
+                
             elif event.type == pygame.MOUSEBUTTONUP:
                 if currscreen == 'pregame' and not play_tutorial:
                     dragging_vision_slider = False
@@ -1698,16 +1956,22 @@ def run_game():
             if len(predator_group) == 0 or len(prey_group) == 0:
                 # choose your message
                 if len(predator_group) == 0:
+                    save_data[active_save_slot]['games_played'] += 1
                     message = 'Predators have gone extinct!'
                     xp_gain = 1
                     end_screen_stats['Pity XP:'] = 1
                     end_screen_stats['Predators Left XP:'] = 0
                 else:
                     message = 'Prey have gone extinct!'
+                    save_data[active_save_slot]['games_played'] += 1
                     xp_gain = len(predator_group) + 1
                     end_screen_stats['Pity XP:'] = 1
                     end_screen_stats['Predators Left XP:'] = len(predator_group)
-
+                    if len(predator_group) >= 50 and save_data[active_save_slot]['achievment8'] == False:
+                        save_data[active_save_slot]['achievment8'] = True
+                        just_unlocked = (8, pygame.time.get_ticks())
+                save_save_data(save_data)
+                previous_page = currscreen
                 currscreen = 'endscreen'
 
                 if active_save_slot is not None:
@@ -1829,6 +2093,9 @@ def run_game():
         elif currscreen == 'title':
             create_title_ui()
         
+        elif currscreen == 'achievements':
+            create_achievements_ui()
+        
         elif currscreen == 'pregame':
             if play_tutorial:
                 # — 1) catch Space/quit events —
@@ -1874,11 +2141,24 @@ def run_game():
             create_pregame_ui()
             
         elif currscreen == 'endscreen':
+            if save_data[active_save_slot]['games_played'] >= 1 and save_data[active_save_slot]['achievment1'] == False:
+                save_data[active_save_slot]['achievment1'] = True
+                just_unlocked = (1, pygame.time.get_ticks())
+                save_save_data(save_data)
+            elif save_data[active_save_slot]['games_played'] >= 5 and save_data[active_save_slot]['achievment4'] == False:
+                save_data[active_save_slot]['achievment4'] = True
+                just_unlocked = (4, pygame.time.get_ticks())
+                save_save_data(save_data)
+            elif save_data[active_save_slot]['games_played'] >= 10 and save_data[active_save_slot]['achievment6'] == False:
+                save_data[active_save_slot]['achievment6'] = True
+                just_unlocked = (6, pygame.time.get_ticks())
+                save_save_data(save_data)
             create_endscreen_ui()
         
         elif currscreen == 'savefiles':
             create_save_file_ui()     
 
+        draw_achievement_popup()
         pygame.display.flip()
         frame_counter += 1
 

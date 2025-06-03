@@ -1,4 +1,4 @@
-slot,used,XP,size_min,size_max,vision_min,vision_max,fertility_min,fertility_max
-1,True,0,10,13,110,140,0.8,1
-2,True,509,1,25,10,251,0.0,26.11
-3,True,22,5,17,54,203,0.8,1.1
+slot,used,XP,size_min,size_max,vision_min,vision_max,fertility_min,fertility_max,achievment1,achievment2,achievment3,achievment4,achievment5,achievment6,achievment7,achievment8,games_played
+1,True,25,7,17,70,200,0.8,1,True,True,False,True,False,False,False,False,6
+2,True,555,1,25,10,270,0.0,28.16,True,True,True,True,True,False,True,False,8
+3,True,22,5,17,54,203,0.8,1.1,False,False,False,False,False,False,False,False,0
