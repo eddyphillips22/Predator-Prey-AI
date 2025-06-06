@@ -47,6 +47,7 @@ from scipy.interpolate import make_interp_spline
 
 # // INITIALISING VARIABLES \\ #
 pygame.init()
+pygame.mixer.init()
 screen_width  = 1100
 screen_height = 600
 screen        = pygame.display.set_mode((screen_width, screen_height))
@@ -191,6 +192,7 @@ predator_fertility = 0.9
 dragging_vision_slider = False
 dragging_size_slider = False
 dragging_fertility_slider = False
+dragging_music_slider = False
 tunnel_offset     = 0      
 tunnel_speed      = 1.2
 tunnel_spacing    = 40   
@@ -223,6 +225,11 @@ for idx, path in achievement_icons.items():
     loaded_icons[idx] = img
 just_unlocked = None
 POPUP_DURATION_MS = 1500 
+GAME_MUSIC_PATH = "assets/cold_winds.mp3"
+INTRO_MUSIC_PATH = "assets/take_care.mp3"
+music_volume = 0.5
+music_playing = False
+
 
 # // UNIVERSAL FUNCTIONS \\ #
 def get_world_coords(mx, my):
@@ -1561,32 +1568,7 @@ def create_achievements_ui():
 
     screen.fill((30, 30, 30))  # dark background
 
-    # 1) Draw a translucent black bar behind the title:
-    title_background = pygame.Surface((screen_width, 60), pygame.SRCALPHA)
-    title_background.fill((0, 0, 0, 160))  # RGBA with alpha=160
-    screen.blit(title_background, (0, 0))
 
-    # 2) Draw “Achievements” text on top:
-    title = title_font.render("Achievements", True, (255, 255, 255))
-    screen.blit(
-        title,
-        (
-            (screen_width - title.get_width()) // 2,
-            (60 - title.get_height()) // 2
-        )
-    )
-
-    # 3) Draw Back button:
-    pygame.draw.rect(screen, (50, 50, 50), back_button)
-    pygame.draw.rect(screen, (255, 255, 255), back_button, 2)
-    back_txt = font.render("Back", True, (255, 255, 255))
-    screen.blit(
-        back_txt,
-        (
-            back_button.x + (back_button.width - back_txt.get_width()) // 2,
-            back_button.y + (back_button.height - back_txt.get_height()) // 2
-        )
-    )
 
     # 4) List each achievement card
     slot = save_data.get(active_save_slot, DEFAULT_SLOT)
@@ -1646,6 +1628,33 @@ def create_achievements_ui():
             screen.blit(txt, (icon_rect.right + pad, rect.y + (h - txt.get_height()) // 2))
 
         y0 += h + pad
+    
+    # 1) Draw a translucent black bar behind the title:
+    title_background = pygame.Surface((screen_width, 60), pygame.SRCALPHA)
+    title_background.fill((0, 0, 0, 200))  # RGBA with alpha=160
+    screen.blit(title_background, (0, 0))
+
+    # 2) Draw “Achievements” text on top:
+    title = title_font.render("Achievements", True, (255, 255, 255))
+    screen.blit(
+        title,
+        (
+            (screen_width - title.get_width()) // 2,
+            (60 - title.get_height()) // 2
+        )
+    )
+
+    # 3) Draw Back button:
+    pygame.draw.rect(screen, (50, 50, 50), back_button)
+    pygame.draw.rect(screen, (255, 255, 255), back_button, 2)
+    back_txt = font.render("Back", True, (255, 255, 255))
+    screen.blit(
+        back_txt,
+        (
+            back_button.x + (back_button.width - back_txt.get_width()) // 2,
+            back_button.y + (back_button.height - back_txt.get_height()) // 2
+        )
+    )
 
 
     # 5) If we just unlocked something (within the last POPUP_DURATION_MS), draw a popup:
@@ -1701,6 +1710,7 @@ fertility_handle_img = pygame.transform.smoothscale(
     fertility_handle_img,
     (24, 24) 
 )
+music_slider_rect   = pygame.Rect(300, 450, 400, 20)  # x, y, width, height
 size_handle_img = pygame.image.load("assets/size_handle.png").convert_alpha()
 size_handle_img = pygame.transform.smoothscale(
     size_handle_img,
@@ -1753,14 +1763,13 @@ def run_game():
     global dragging_fertility_slider, end_screen_stats, player_controlled, controlling_mode
     global move_x, move_y, sprinting, trying_eat, trying_reproduce, play_tutorial
     global achievements_scroll, SCROLL_SPEED, achievement_labels, previous_page, just_unlocked
+    global music_playing
     num_items      = len(achievement_labels)         
     item_h, pad    = 80, 10                          
     y_start        = 80                              
     content_height = num_items * item_h + (num_items - 1) * pad
     min_scroll     = min(0, screen_height - (y_start + content_height))
     max_scroll     = 0
-
-    # now define your own counter for this run
     frame_counter = 0
     running       = True
     currscreen    = 'savefiles'
@@ -2156,8 +2165,23 @@ def run_game():
             create_endscreen_ui()
         
         elif currscreen == 'savefiles':
-            create_save_file_ui()     
+            create_save_file_ui()  
+        
+        if currscreen == 'gamescreen' and not music_playing:
+            # we’ve just entered gamescreen → load & play
+            try:
+                pygame.mixer.music.load(GAME_MUSIC_PATH)
+                pygame.mixer.music.set_volume(music_volume)
+                pygame.mixer.music.play(-1)  # loop indefinitely
+                music_playing = True
+            except Exception as e:
+                print(f"[MUSIC ERROR] Could not load/play {GAME_MUSIC_PATH}: {e}")
 
+        elif currscreen != 'gamescreen' and currscreen != 'endscreen' and music_playing:
+            # we’ve left gamescreen → stop the music
+            pygame.mixer.music.stop()
+            music_playing = False
+    # now define your own counter for this run
         draw_achievement_popup()
         pygame.display.flip()
         frame_counter += 1
