@@ -1,0 +1,62 @@
+BEGIN
+    running = TRUE
+    framecounter = 0
+    WHILE running
+        GET events
+        GET currscreen
+        FOR event IN events
+            IF event = quit THEN
+                RETURN gameclose
+            IF event = mouseclick THEN
+                IF currscreen = 'gamescreen' THEN
+                    IF mouseclick on settingsbutton.x, settingsbutton.y THEN
+                        currscreen = 'settings'
+                    ELSE IF mouseclick on sprite.x, sprite.y THEN
+                        RETURN spectate
+                ELSE IF currscreen = 'pregame' THEN
+                    IF mouseclick on startbutton.x, startbutton.y THEN
+                        RETURN startgame
+                    ENDIF
+                ENDIF
+            ELSEIF event = keypress THEN
+                IF currscreen = 'gamescreen' THEN
+                    IF key = 'leftarrow' THEN
+                        EXECUTE slowdown
+                    ELSE IF key = 'rightarrow' THEN
+                        RETURN speedup
+                    ENDIF
+                ENDIF
+            ENDIF
+        ENDFOR
+
+        IF currscreen = 'gamescreen' THEN
+            GET predators, prey
+            IF predators.length = 0:
+                DISPLAY message "All predators eliminated!"
+                currscreen = 'endscreen'
+            ELSE IF prey.length = 0:
+                DISPLAY message "All prey eliminated!"
+                currscreen = 'endscreen'
+        
+            spawnplants()
+            updateprey()
+            updatepredators()
+
+            creategameui()
+            blitworld()
+        
+        ELSE IF currscreen = 'settings' THEN
+            createsettingsui()
+        
+        ELSE IF currscreen = 'pregame' THEN
+            createpregameui()
+        
+        ELSE IF currscreen = 'endscreen' THEN
+            createendscreenui()
+        
+        ENDIF
+
+        drawachievmentpopups()
+        framecounter += 1
+    ENDWHILE
+END

@@ -103,6 +103,9 @@ def play_gif_sequence(paths):
     Play each GIF (given by its file‐path) exactly once,
     honouring each frame’s own duration, then return.
     """
+    global current_music
+    pygame.mixer.music.stop()
+    current_music = None
     clock = pygame.time.Clock()
 
     for path in paths:
@@ -165,7 +168,6 @@ achievements_scroll = 0
 SCROLL_SPEED = 12
 tutorial_sentences = ["You have escaped the evil scientists!", 
                         "You are now stuck on the poorly sanitized floor of a lab.",
-                        "You must survive and thrive in this hostile environment.",
                         "Begin by setting the stats of your predators",
                         "You can only control their vision at the moment",
                         "But gain more XP to unlock more stats to change.",
@@ -224,12 +226,12 @@ for idx, path in achievement_icons.items():
     img = pygame.image.load(path).convert_alpha()
     loaded_icons[idx] = img
 just_unlocked = None
-POPUP_DURATION_MS = 1500 
+POPUP_DURATION_MS = 2500
 GAME_MUSIC_PATH = "assets/cold_winds.mp3"
 INTRO_MUSIC_PATH = "assets/take_care.mp3"
 music_volume = 0.5
 music_playing = False
-
+current_music = None
 
 # // UNIVERSAL FUNCTIONS \\ #
 def get_world_coords(mx, my):
@@ -1223,7 +1225,7 @@ def create_game_ui():
 
 
 def create_settings_ui():
-    screen.fill((0,0,0,180))
+    screen.fill((0,0,0,255))
     pygame.draw.rect(screen, (50,50,50), back_button)
     pygame.draw.rect(screen, (255,255,255), back_button, 2)
     txt = font.render("Back", True, (255,255,255))
@@ -1245,6 +1247,14 @@ def create_settings_ui():
             pygame.draw.rect(screen, (0,200,0), inner)
         lbl = font.render(opt["label"], True, (255,255,255))
         screen.blit(lbl, (box.right+10, box.y+(box.height-lbl.get_height())//2))
+
+    track_rect = music_slider_rect
+    screen.blit(track_img, track_rect.topleft)
+    handle_x = track_rect.x + int(music_volume * track_rect.width)
+    hy = track_rect.y + track_rect.height//2 - music_handle_img.get_height()//1.5
+    screen.blit(music_handle_img, (handle_x - music_handle_img.get_width()//2, hy))
+    txt = font.render(f"Music Volume: {int(music_volume*100)}%", True, (255,255,255))
+    screen.blit(txt, (track_rect.centerx - txt.get_width()//2, track_rect.y - 30))
         
 def blit_world_with_camera(skip=(None)):
     """Draw the world to a temp surface, scale & blit it under camera."""
@@ -1710,10 +1720,15 @@ fertility_handle_img = pygame.transform.smoothscale(
     fertility_handle_img,
     (24, 24) 
 )
-music_slider_rect   = pygame.Rect(300, 450, 400, 20)  # x, y, width, height
+music_slider_rect   = pygame.Rect(100, 450, 400, 20)  # x, y, width, height
 size_handle_img = pygame.image.load("assets/size_handle.png").convert_alpha()
 size_handle_img = pygame.transform.smoothscale(
     size_handle_img,
+    (24, 24) 
+)
+music_handle_img = pygame.image.load("assets/music_handle.png").convert_alpha()
+music_handle_img = pygame.transform.smoothscale(
+    music_handle_img,
     (24, 24) 
 )
 vision_handle_img = pygame.image.load("assets/vision_handle2.png").convert_alpha()
@@ -1763,7 +1778,7 @@ def run_game():
     global dragging_fertility_slider, end_screen_stats, player_controlled, controlling_mode
     global move_x, move_y, sprinting, trying_eat, trying_reproduce, play_tutorial
     global achievements_scroll, SCROLL_SPEED, achievement_labels, previous_page, just_unlocked
-    global music_playing
+    global music_playing, dragging_music_slider, music_volume, current_music
     num_items      = len(achievement_labels)         
     item_h, pad    = 80, 10                          
     y_start        = 80                              
@@ -1837,6 +1852,8 @@ def run_game():
                             plant_group.empty()
                             message = "Simulation Terminated"
                             screen.fill((0,0,0))
+                        elif music_slider_rect.collidepoint((mx, my)):
+                            dragging_music_slider = True
                 elif currscreen == 'title':
                     if start_button.collidepoint((mx, my)):
                         previous_page = currscreen
@@ -1932,6 +1949,8 @@ def run_game():
                     dragging_vision_slider = False
                     dragging_size_slider = False
                     dragging_fertility_slider = False
+                if currscreen == 'settings':
+                    dragging_music_slider = False
             
             elif event.type == pygame.MOUSEMOTION:
                 if currscreen == 'pregame' and not play_tutorial:
@@ -1957,6 +1976,12 @@ def run_game():
                         predator_fertility = float(round(
                             sd["fertility_min"] + percent * (sd["fertility_max"] - sd["fertility_min"]),2
                         ))
+                if currscreen == 'settings':
+                    if dragging_music_slider:
+                        mx, my = pygame.mouse.get_pos()
+                        rel_x = max(0, min(mx - music_slider_rect.x, music_slider_rect.width))
+                        music_volume = round(rel_x / music_slider_rect.width, 2)
+                        pygame.mixer.music.set_volume(music_volume)
 
         clock.tick(60)
 
@@ -2167,20 +2192,26 @@ def run_game():
         elif currscreen == 'savefiles':
             create_save_file_ui()  
         
-        if currscreen == 'gamescreen' and not music_playing:
-            # we’ve just entered gamescreen → load & play
-            try:
-                pygame.mixer.music.load(GAME_MUSIC_PATH)
-                pygame.mixer.music.set_volume(music_volume)
-                pygame.mixer.music.play(-1)  # loop indefinitely
-                music_playing = True
-            except Exception as e:
-                print(f"[MUSIC ERROR] Could not load/play {GAME_MUSIC_PATH}: {e}")
-
-        elif currscreen != 'gamescreen' and currscreen != 'endscreen' and music_playing:
-            # we’ve left gamescreen → stop the music
+        desired = None
+        if currscreen in ('gamescreen', 'endscreen'):
+            desired = GAME_MUSIC_PATH
+        elif currscreen not in ('gamescreen', 'endscreen') and not play_tutorial:
+            desired = INTRO_MUSIC_PATH
+        
+        if desired != current_music:
             pygame.mixer.music.stop()
+            current_music = None
             music_playing = False
+            if desired:
+                try:
+                    pygame.mixer.music.load(desired)
+                    pygame.mixer.music.set_volume(music_volume)
+                    pygame.mixer.music.play(-1)  # loop indefinitely
+                    current_music = desired
+                    music_playing = True
+                except Exception as e:
+                    print(f"[MUSIC ERROR] Could not load/play {desired}: {e}")
+            
     # now define your own counter for this run
         draw_achievement_popup()
         pygame.display.flip()
