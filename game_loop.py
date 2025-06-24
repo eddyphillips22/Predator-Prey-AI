@@ -1,10 +1,18 @@
-# // IMPORTS \\ #
-import pygame
-import random
-import math
-import numpy as np
-import os
-import csv
+#=====================================================
+# IMPORTS & CONSTANTS
+#=====================================================
+import pygame #pygame is used for rendering and input handling
+import random #random is used for generating random numbers
+import math #math is used for mathematical operations
+import numpy as np #numpy is used for numerical operations
+import os #os is used for file operations
+import csv #csv is used for reading and writing CSV files
+import AI #AI is used for the neural network and decision making
+import Old_NN #Old_NN is used solely for the sigmoid derivative function as I wanted to keep it in to show what it is and how its coded
+from PIL import Image, ImageSequence #PIL is used for image processing
+from scipy.interpolate import make_interp_spline #scipy is used for interpolation
+import sys #sys is used for system operations
+
 
 SAVE_FILE_PATH = "saves.csv"
 IDLE, WANDER, CHASE, EAT, REPRODUCE = 0,1,2,3,4
@@ -38,12 +46,6 @@ DEFAULT_SLOT = {
     "achievment8": False,
     "games_played": 0
 }
-import AI
-import Old_NN
-import torch
-import torch.nn.functional as F
-from PIL import Image
-from scipy.interpolate import make_interp_spline
 
 # // INITIALISING VARIABLES \\ #
 pygame.init()
@@ -51,19 +53,129 @@ pygame.mixer.init()
 screen_width  = 1100
 screen_height = 600
 screen        = pygame.display.set_mode((screen_width, screen_height))
-background = pygame.image.load("assets/background.png").convert()
-background_computer = pygame.image.load("assets/computer.png").convert()
+active_save_slot = None
+
+
+
+
+gif_index    = 0
+gif_timer    = 0
+GIF_FPS      = 60
+predator_counts = []
+prey_counts = []
+time_steps = []
+simulation_seconds = 0.0
+plant_spawn_timer = 0
+session_size_min = None
+session_size_max = None
+previous_page = None
+session_vision_min = None
+session_vision_max = None
+session_fertility_min = None
+session_fertility_max = None
+pygame.display.set_caption("Predator-Prey Simulation")
+clock         = pygame.time.Clock()
+first_names = ["Blimple", "Shleeby", "Plingus", "Florbam", "Zimble", "Bimplus", "Gleeby", "Flingle", "Pingus", "Limble", "Glimpus", "Flimble", "Shneeble", "Pimblus", "Sneebly", "Glimble", "Blimpy", "Zimble", "Flimsy", "Shlumpy", "Dingle", "Shlurp"]
+last_names = ["Blim", "Plom", "Blip", "Stimp", "Pom", "Bing", "Flim", "Glim", "Zim", "Plop", "Shlurp", "Blimp", "Florp", "Glimp", "Ploob", "Shleeb", "Bloop", "Plim", "Zimble", "Flimsy", "Shlumpy"]
+time_multiplier = 1.0
+font            = pygame.font.SysFont(None, 24)
+title_font     = pygame.font.SysFont(None, 48)
+spectate_target = None
+player_controlled = None
+controlling_mode = False
+play_tutorial = False
+tutorial_sentence_idx = 0 
+tutorial_letter_idx   = 0
+paused_until_space    = False 
+typing_interval       = 3
+achievements_scroll = 0
+SCROLL_SPEED = 12
+tutorial_sentences = ["You have escaped the evil scientists!", 
+                        "You are now stuck on the poorly sanitized floor of a lab.",
+                        "Begin by setting the stats of your predators",
+                        "You can only control their vision at the moment",
+                        "But gain more XP to unlock more stats to change.",
+                        "The Minimum and Maximum values will increase or decrease over time.",
+                        "This is based on the highest or lowest value that you acheive in the game",
+                        "Now get to eating!"
+                        
+]
+move_x       = 0
+move_y       = 0
+sprinting    = False
+trying_eat     = False
+trying_reproduce = False
+zoom_level     = 1.0
+cam_offset_x    = 0
+cam_offset_y    = 0
+MAX_STEPS = 1000
+MAX_IDLE = 60
+predator_group = pygame.sprite.Group()
+prey_group = pygame.sprite.Group()
+predator_base_size = 12
+predator_vision_distance = 120
+predator_fertility = 0.9
+dragging_vision_slider = False
+dragging_size_slider = False
+dragging_fertility_slider = False
+dragging_music_slider = False
+tunnel_offset     = 0      
+tunnel_speed      = 1.2
+tunnel_spacing    = 40   
+tunnel_line_width = 2      
+tunnel_color      = (60,60,60)
+end_screen_stats = {}
+achievement_labels = [
+    "First Steps (Complete 1 Simulation)",                                  # achievement1
+    "Swole AF (Unlock Size)",                                               # achievement2
+    "Big Ole Eye (Unlock Cyclops Predators)",                               # achievement3
+    "Getting the Hang of it (Complete 5 Simulations)",                      # achievement4
+    "Getting Frisky (Unlock Fertility)",                                    # achievement5
+    "Experienced (Complete 10 Simulations)",                                # achievement6
+    "This One Looks a Little Funny? (Create a differently abled Predator)", # achievement7          
+    "Horde (Finish with over 50 predators)"          # achievement8
+]
+achievement_icons = {
+    1: "assets/bronze_shoe.png",
+    2: "assets/size_handle.png",
+    3: "assets/cyclopspred.png",
+    4: "assets/silver_shoe.png",
+    5: "assets/fertility_handle.png",
+    6: "assets/gold_shoe.png",
+    7: "assets/disabledpred.png",
+    8: "assets/horde.png"
+}
+loaded_icons = {}
+# Image Loader for PyInstaller Exe File
+def resource_path(relative_path):
+    try:
+        base_path = sys._MEIPASS  # PyInstaller temp folder
+    except AttributeError:
+        base_path = os.path.abspath(".")
+
+    return os.path.join(base_path, relative_path)
+for idx, path in achievement_icons.items():
+    img = pygame.image.load(resource_path(path)).convert_alpha()
+    loaded_icons[idx] = img
+background = pygame.image.load(resource_path("assets/background.png")).convert()
+background_computer = pygame.image.load(resource_path("assets/computer.png")).convert()
 background_computer = pygame.transform.scale(
                     background_computer,
                     (screen_width * 1.3, screen_height * 1.3)
                 )
 background = pygame.transform.smoothscale(background,
                                         (screen_width, screen_height))
-active_save_slot = None
+just_unlocked = None
+POPUP_DURATION_MS = 2500
+GAME_MUSIC_PATH = "assets/cold_winds.mp3"
+INTRO_MUSIC_PATH = "assets/take_care.mp3"
+music_volume = 0.5
+music_playing = False
+current_music = None
 
-from PIL import Image, ImageSequence
-import pygame
-
+#=====================================================
+# UNIVERSAL FUNCTIONS
+#=====================================================
 def load_gif_frames(path):
 
     pil = Image.open(path)
@@ -134,106 +246,6 @@ def play_gif_sequence(paths):
                 # 3) tick at 60fps so we don't peg the CPU
                 clock.tick(60)
 
-gif_index    = 0
-gif_timer    = 0
-GIF_FPS      = 60
-predator_counts = []
-prey_counts = []
-time_steps = []
-simulation_seconds = 0.0
-plant_spawn_timer = 0
-session_size_min = None
-session_size_max = None
-previous_page = None
-session_vision_min = None
-session_vision_max = None
-session_fertility_min = None
-session_fertility_max = None
-pygame.display.set_caption("Predator-Prey Simulation")
-clock         = pygame.time.Clock()
-first_names = ["Blimple", "Shleeby", "Plingus", "Florbam", "Zimble", "Bimplus", "Gleeby", "Flingle", "Pingus", "Limble", "Glimpus", "Flimble", "Shneeble", "Pimblus", "Sneebly", "Glimble", "Blimpy", "Zimble", "Flimsy", "Shlumpy", "Dingle", "Shlurp"]
-last_names = ["Blim", "Plom", "Blip", "Stimp", "Pom", "Bing", "Flim", "Glim", "Zim", "Plop", "Shlurp", "Blimp", "Florp", "Glimp", "Ploob", "Shleeb", "Bloop", "Plim", "Zimble", "Flimsy", "Shlumpy"]
-time_multiplier = 1.0
-font            = pygame.font.SysFont(None, 24)
-title_font     = pygame.font.SysFont(None, 48)
-spectate_target = None
-player_controlled = None
-controlling_mode = False
-play_tutorial = False
-tutorial_sentence_idx = 0 
-tutorial_letter_idx   = 0
-paused_until_space    = False 
-typing_interval       = 3
-achievements_scroll = 0
-SCROLL_SPEED = 12
-tutorial_sentences = ["You have escaped the evil scientists!", 
-                        "You are now stuck on the poorly sanitized floor of a lab.",
-                        "Begin by setting the stats of your predators",
-                        "You can only control their vision at the moment",
-                        "But gain more XP to unlock more stats to change.",
-                        "The Minimum and Maximum values will increase or decrease over time.",
-                        "This is based on the highest or lowest value that you acheive in the game",
-                        "Now get to eating!"
-                        
-]
-move_x       = 0
-move_y       = 0
-sprinting    = False
-trying_eat     = False
-trying_reproduce = False
-zoom_level     = 1.0
-cam_offset_x    = 0
-cam_offset_y    = 0
-MAX_STEPS = 1000
-MAX_IDLE = 60
-predator_group = pygame.sprite.Group()
-prey_group = pygame.sprite.Group()
-predator_base_size = 12
-predator_vision_distance = 120
-predator_fertility = 0.9
-dragging_vision_slider = False
-dragging_size_slider = False
-dragging_fertility_slider = False
-dragging_music_slider = False
-tunnel_offset     = 0      
-tunnel_speed      = 1.2
-tunnel_spacing    = 40   
-tunnel_line_width = 2      
-tunnel_color      = (60,60,60)
-end_screen_stats = {}
-achievement_labels = [
-    "First Steps (Complete 1 Simulation)",       # achievement1
-    "Swole AF (Unlock Size)",   # achievement2
-    "Big Ole Eye (Unlock Cyclops Predators)",          # achievement3
-    "Getting the Hang of it (Complete 5 Simulations)",         # achievement4
-    "Getting Frisky (Unlock Fertility)",        # achievement5
-    "Experienced (Complete 10 Simulations)",    # achievement6
-    "This One Looks a Little Funny? (Create a differently abled Predator)", # achievement7          
-    "Horde (Finish with over 50 predators)"          # achievement8
-]
-achievement_icons = {
-    1: "assets/bronze_shoe.png",
-    2: "assets/size_handle.png",
-    3: "assets/cyclopspred.png",
-    4: "assets/silver_shoe.png",
-    5: "assets/fertility_handle.png",
-    6: "assets/gold_shoe.png",
-    7: "assets/disabledpred.png",
-    8: "assets/horde.png"
-}
-loaded_icons = {}
-for idx, path in achievement_icons.items():
-    img = pygame.image.load(path).convert_alpha()
-    loaded_icons[idx] = img
-just_unlocked = None
-POPUP_DURATION_MS = 2500
-GAME_MUSIC_PATH = "assets/cold_winds.mp3"
-INTRO_MUSIC_PATH = "assets/take_care.mp3"
-music_volume = 0.5
-music_playing = False
-current_music = None
-
-# // UNIVERSAL FUNCTIONS \\ #
 def get_world_coords(mx, my):
     """Convert screen coords → world coords under current camera."""
     world_x = (mx - cam_offset_x) / zoom_level
@@ -248,12 +260,12 @@ def handle_spectate_click(mx, my):
         for spr in group:
             if spr.rect.collidepoint(wx, wy):
                 spectate_target = spr
-                zoom_level      = 2.0    # or whatever you like
+                zoom_level      = 2.0
                 return True
     return False
 
 def load_save_data():
-    # If missing, create a fresh file with three default slots
+    # If missing, create a fresh file with default slots
     if not os.path.exists(SAVE_FILE_PATH):
         data = {i: DEFAULT_SLOT.copy()}
         save_save_data(data)
@@ -359,8 +371,9 @@ def create_tunnel_background():
         r += tunnel_spacing
 
 
-
-# // CLASSES \\ #
+#=====================================================
+# PREDATOR CLASS
+#=====================================================
 class predator(pygame.sprite.Sprite):
     def __init__(self, x, y):
         super().__init__()
@@ -420,16 +433,16 @@ class predator(pygame.sprite.Sprite):
         self.time_since_eat = 0
         # sprite image
         if self.vision_distance > 270:
-            self.image = pygame.image.load("assets/cyclopspred.png").convert_alpha()
+            self.image = pygame.image.load(resource_path("assets/cyclopspred.png")).convert_alpha()
             if save_data[active_save_slot]['achievment3'] is False:
                 save_data[active_save_slot]['achievment3'] = True
                 global just_unlocked
                 just_unlocked = (3, pygame.time.get_ticks())
                 save_save_data(save_data)
         elif self.disabled:
-            self.image = pygame.image.load("assets/disabledpred.png").convert_alpha()
+            self.image = pygame.image.load(resource_path("assets/disabledpred.png")).convert_alpha()
         else:
-            self.image = pygame.image.load("assets/predimg.png").convert_alpha()
+            self.image = pygame.image.load(resource_path("assets/predimg.png")).convert_alpha()
         self.image = pygame.transform.smoothscale(
             self.image,
             (int(self.size*2), int(self.size*2))
@@ -465,6 +478,7 @@ class predator(pygame.sprite.Sprite):
         pygame.draw.polygon(tmp, (200,200,200), [apex, left_bound, right_bound], 1)
         screen.blit(tmp, (0,0))
 
+    # Detect prey within vision distance and field of view
     def detect_prey(self, prey_list):
         found = []
         for prey in prey_list:
@@ -478,6 +492,7 @@ class predator(pygame.sprite.Sprite):
                     found.append((prey, d))
         return found
 
+    # Decide on an action based on prey visibility and AI model
     def decide_target(self, prey_group):
         visible = self.detect_prey(prey_group)
         if not visible and self.chasing and self.target_prey:
@@ -515,6 +530,7 @@ class predator(pygame.sprite.Sprite):
             self.target_prey = None
         self.action = action
     
+    # Reproduce a new predator based on this one’s stats
     def reproduce(self):
         global just_unlocked
         children = []
@@ -555,7 +571,7 @@ class predator(pygame.sprite.Sprite):
                 child.base_speed = 0.1
                 child.max_hunger = child.max_hunger * random.uniform(0.1, 0.2)
                 child.disabled  = True
-                img = pygame.image.load("assets/disabledpred.png").convert_alpha()
+                img = pygame.image.load(resource_path("assets/disabledpred.png")).convert_alpha()
                 img = pygame.transform.smoothscale(img, (int(child.size*2), int(child.size*2)))
                 child.original_image = img
                 child.image          = img
@@ -572,7 +588,7 @@ class predator(pygame.sprite.Sprite):
         return children
         
 
-
+    # Update the predator's state
     def update(self):
         global controlling_mode, player_controlled, spectate_target, zoom_level
         self.age_seconds += time_multiplier * (1/60)
@@ -716,7 +732,7 @@ class predator(pygame.sprite.Sprite):
         self.y = max(10, min(screen_height-10, self.y))
         self.rect.center = (int(self.x), int(self.y))
         
-
+    # Custom draw method to handle rotation and vision
     def custom_draw(self, surface, prey_group, show_debug, show_vision):
         deg = -math.degrees(self.angle) - 90
         rotated = pygame.transform.rotate(self.original_image, deg)
@@ -730,7 +746,7 @@ class predator(pygame.sprite.Sprite):
                                 (int(self.x),int(self.y)),
                                 (int(prey_obj.x),int(prey_obj.y)), 1)
 
-
+    # Draw the vision mask as a semi-transparent triangle
     def draw_vision_mask(self, screen):
         # pull in your camera/zoom globals
         global cam_offset_x, cam_offset_y, zoom_level
@@ -763,7 +779,9 @@ class predator(pygame.sprite.Sprite):
         # 6) Blit on top
         screen.blit(mask, (0,0))
 
-
+#=====================================================
+# PREY CLASS
+#=====================================================
 class prey(pygame.sprite.Sprite):
     def __init__(self, x, y):
         super().__init__()
@@ -823,7 +841,7 @@ class prey(pygame.sprite.Sprite):
         self.time_since_idle = 0
 
         # sprite
-        self.image = pygame.image.load("assets/preyimg.png").convert_alpha()
+        self.image = pygame.image.load(resource_path("assets/preyimg.png")).convert_alpha()
         self.image = pygame.transform.smoothscale(
             self.image,
             (int(self.size*2), int(self.size*2))
@@ -847,7 +865,7 @@ class prey(pygame.sprite.Sprite):
         self.image = pygame.transform.smoothscale(self.original_image, (self.size*2, self.size*2))
         self.rect = self.image.get_rect(center=(int(self.x), int(self.y)))
         
-        
+    # Custom draw method to draw flight zone
     def draw_flightzone(self, surface):
         tmp = pygame.Surface((self.flightzone_radius*2, self.flightzone_radius*2), pygame.SRCALPHA)
         pygame.draw.circle(tmp, self.flightzone_colour,
@@ -855,6 +873,7 @@ class prey(pygame.sprite.Sprite):
                         self.flightzone_radius, 1)
         surface.blit(tmp, (self.x - self.flightzone_radius, self.y - self.flightzone_radius))
 
+    # Detect predators within flight zone
     def detect_predators(self, preds):
         found = []
         for p in preds:
@@ -865,6 +884,7 @@ class prey(pygame.sprite.Sprite):
                 found.append((p,d))
         return found
     
+    # Perform a grazing action
     def _perform_graze(self):
         # pick a plant if needed
         if (self._graze_target is None 
@@ -908,7 +928,7 @@ class prey(pygame.sprite.Sprite):
                 pl.kill()
                 self._graze_target = None
         
-
+    # Decide on an action based on predator visibility and AI model
     def decidebehaviour(self, predator_group):
         # 1) Find all predators chasing *you*
         chasing_preds = [
@@ -969,6 +989,7 @@ class prey(pygame.sprite.Sprite):
             self.flee_score   = 0.0
         self.action = action
     
+    # Reproduce a new prey based on this one’s stats
     def reproduce(self):
         children = []
         if random.random() > self.fertility:
@@ -1116,7 +1137,9 @@ class prey(pygame.sprite.Sprite):
         if show_flightzone:
             self.draw_flightzone(surface)
 
-
+#=====================================================
+# Plant Class
+#=====================================================
 class plant(pygame.sprite.Sprite):
     def __init__(self, x, y, *groups):
         super().__init__(*groups)
@@ -1125,12 +1148,14 @@ class plant(pygame.sprite.Sprite):
         self.max_size    = self.size * random.uniform(1.5, 2.5)
         self._rebuild_image(x, y)
 
+    # Rebuild the plant's image based on its size
     def _rebuild_image(self, cx, cy):
         s = max(1, int(self.size))
         self.image = pygame.Surface((s*2, s*2), pygame.SRCALPHA)
         pygame.draw.circle(self.image, (0,200,0), (s,s), s)
         self.rect = self.image.get_rect(center=(cx,cy))
 
+    # Update the plant's size and image
     def update(self):
         if self.size < self.max_size:
             self.size = min(self.max_size,
@@ -1139,7 +1164,11 @@ class plant(pygame.sprite.Sprite):
             self._rebuild_image(cx, cy)
 
 
-# // UI FUNCTIONS \\ #
+#=====================================================
+# UI FUNCTIONS
+#=====================================================
+
+# Draw the population graph for predators and prey
 def draw_population_graph(surface, x, y, w, h):
     if len(time_steps) < 4:
         return
@@ -1175,7 +1204,7 @@ def draw_population_graph(surface, x, y, w, h):
         x_vals = np.array(total_game_time)
         y_vals = np.array(data)
         if len(x_vals) < 4:
-            return  # need at least 4 points for spline
+            return 
 
         # Interpolation
         x_new = np.linspace(x_vals.min(), x_vals.max(), 300)
@@ -1191,25 +1220,31 @@ def draw_population_graph(surface, x, y, w, h):
     draw_smooth_curve(predator_counts, (255, 0, 0))
     draw_smooth_curve(prey_counts, (0, 255, 0))
 
+# Create the game UI with buttons and stats
 def create_game_ui():
     # time controls & settings button…
+    # slow down button
     pygame.draw.rect(screen, (50,50,50), slow_down_button)
     pygame.draw.rect(screen, (255,255,255), slow_down_button, 2)
     txt = font.render("<<<", True, (255,255,255))
     screen.blit(txt, (slow_down_button.x + (slow_down_button.width - txt.get_width())//2,
                     slow_down_button.y + (slow_down_button.height - txt.get_height())//2))
 
+    # speed up button
     pygame.draw.rect(screen, (50,50,50), speed_up_button)
     pygame.draw.rect(screen, (255,255,255), speed_up_button, 2)
     txt = font.render(">>>", True, (255,255,255))
     screen.blit(txt, (speed_up_button.x + (speed_up_button.width - txt.get_width())//2,
                     speed_up_button.y + (speed_up_button.height - txt.get_height())//2))
 
+    # Settings button
     pygame.draw.rect(screen, (50,50,50), settings_button)
     pygame.draw.rect(screen, (255,255,255), settings_button, 2)
     txt = font.render("Settings", True, (255,255,255))
     screen.blit(txt, (settings_button.x + (settings_button.width - txt.get_width())//2,
                     settings_button.y + (settings_button.height - txt.get_height())//2))
+    
+    # Information text in bottom left
     txt = font.render("FPS: " + str(int(clock.get_fps())), True, (255,255,255))
     screen.blit(txt, (10, screen_height-80))
     txt = font.render("Predators: " + str(len(predator_group)), True, (255,255,255))
@@ -1223,21 +1258,24 @@ def create_game_ui():
     screen.blit(tm, (screen_width-160, screen_height-80))
     
 
-
+# Create the settings UI with checkboxes and buttons
 def create_settings_ui():
     screen.fill((0,0,0,255))
+    # Back Button
     pygame.draw.rect(screen, (50,50,50), back_button)
     pygame.draw.rect(screen, (255,255,255), back_button, 2)
     txt = font.render("Back", True, (255,255,255))
     screen.blit(txt, (back_button.x + (back_button.width - txt.get_width())//2,
                     back_button.y + (back_button.height - txt.get_height())//2))
     
+    #Restart Button
     pygame.draw.rect(screen, (50,50,50), restart_button)
     pygame.draw.rect(screen, (255,255,255), restart_button, 2)
     txt = font.render("Restart", True, (255,255,255))
     screen.blit(txt, (restart_button.x + (restart_button.width - txt.get_width())//2,
                     restart_button.y + (restart_button.height - txt.get_height())//2))
 
+    # Settings Checkboxes
     for opt in settings_checkboxes:
         box = opt["rect"]
         pygame.draw.rect(screen, (200,200,200), box)
@@ -1248,6 +1286,7 @@ def create_settings_ui():
         lbl = font.render(opt["label"], True, (255,255,255))
         screen.blit(lbl, (box.right+10, box.y+(box.height-lbl.get_height())//2))
 
+    # Music volume slider
     track_rect = music_slider_rect
     screen.blit(track_img, track_rect.topleft)
     handle_x = track_rect.x + int(music_volume * track_rect.width)
@@ -1255,7 +1294,8 @@ def create_settings_ui():
     screen.blit(music_handle_img, (handle_x - music_handle_img.get_width()//2, hy))
     txt = font.render(f"Music Volume: {int(music_volume*100)}%", True, (255,255,255))
     screen.blit(txt, (track_rect.centerx - txt.get_width()//2, track_rect.y - 30))
-        
+
+# Blit the world with camera offset and zoom
 def blit_world_with_camera(skip=(None)):
     """Draw the world to a temp surface, scale & blit it under camera."""
     global cam_offset_x, cam_offset_y
@@ -1292,11 +1332,12 @@ def blit_world_with_camera(skip=(None)):
     
 
 
-
+# Draw the spectate panel with target stats and controls
 def draw_spectate_panel():
     panel = pygame.Surface((200,100), pygame.SRCALPHA)
     panel.fill((0,0,0,180))
     screen.blit(panel, (10,10))
+    # Draw the spectate target's stats
     screen.blit(font.render(f"Hunger: {spectate_target.hunger:.0f}/{spectate_target.max_hunger}", True, (255,255,255)), (20,20))
     screen.blit(font.render(f"Base Speed: {round(spectate_target.base_speed, 3)}", True, (255,255,255)), (20,40))
     screen.blit(font.render(f"Current Speed: {round(spectate_target.current_speed,3)}", True, (255,255,255)), (20,60))
@@ -1304,6 +1345,7 @@ def draw_spectate_panel():
     screen.blit(font.render(f"Current Age: {round((spectate_target.age_seconds / YEAR_LENGTH), 1)}", True, (255,255,255)), (20,100))
     screen.blit(font.render(f"Pos: ({spectate_target.x:.1f},{spectate_target.y:.1f})", True, (200,200,200)), (20,120))
     screen.blit(font.render(f"Currently Spectating: {spectate_target.name}", True, (255,255,255)), (400,40))
+    # Draw the spectate controls
     pygame.draw.rect(screen, (0,0,0), c_key_rect,2)
     screen.blit(c_key, c_key_rect.topleft)
     screen.blit(font.render("Control", True, (255,255,255)), (c_key_rect.x + c_key_rect.width + 10, c_key_rect.y + 5))
@@ -1316,10 +1358,11 @@ def draw_spectate_panel():
         screen.blit(font.render("Reproduce", True, (255,255,255)), (r_key_rect.x + r_key_rect.width + 10, r_key_rect.y + 5))
         pass
 
+# Create the title UI with background, title, and start button
 def create_title_ui():
     create_tunnel_background()
     title = title_font.render("Predator / Prey Simulation", True, (255,255,255))
-    orig_img   = pygame.image.load("assets/start_button2.png").convert_alpha()
+    orig_img   = pygame.image.load(resource_path("assets/start_button2.png")).convert_alpha()
     orig_w, h  = orig_img.get_size()
     scale      = 2
     
@@ -1360,6 +1403,7 @@ def spawn_initial_sprites():
         plant_group.add(plant(random.randint(10,screen_width-10),
                         random.randint(10,screen_height-10)))
 
+# Create the end screen UI with background, title, stats, restart button and Graph
 def create_endscreen_ui():
     create_tunnel_background()
     title = title_font.render(message, True, (255,255,255))
@@ -1474,7 +1518,7 @@ def create_pregame_ui():
     )
 
     # --- Locks (also centred over their slider) ---
-    lock = pygame.image.load("assets/locked.png").convert_alpha()
+    lock = pygame.image.load(resource_path("assets/locked.png")).convert_alpha()
     if sd['XP'] < VISION_UNLOCK_XP:
         # draw lock above size slider
         lx = center_x - lock.get_width() // 2
@@ -1518,6 +1562,7 @@ def create_pregame_ui():
     pygame.draw.rect(screen, (200,200,200), achievment_rect, 2)
     screen.blit(achievement_img, (achievment_rect.x + 5, achievment_rect.y + 5))
 
+# Create the tutorial UI with text and instructions
 def create_tutorial_ui(text):
     # translucent overlay
     overlay = pygame.Surface((screen_width, screen_height), pygame.SRCALPHA)
@@ -1529,6 +1574,7 @@ def create_tutorial_ui(text):
     screen.blit(surf, rect)
     screen.blit(font.render("Press Space to continue...", True, (255,255,255)), (screen_width//2 - 100, screen_height//2 + 250))
 
+# Create the save/load UI with buttons and save slots
 def create_save_file_ui():
     create_tunnel_background()
     title = title_font.render("Load/Save Game", True, (255,255,255))
@@ -1568,6 +1614,7 @@ def create_save_file_ui():
                 ))
     # Back button
 
+# Drawing the achievements UI
 def create_achievements_ui():
     """
     Draw the achievements list. Whenever save_data[active_save_slot][f'achievment{i}'] 
@@ -1578,9 +1625,6 @@ def create_achievements_ui():
 
     screen.fill((30, 30, 30))  # dark background
 
-
-
-    # 4) List each achievement card
     slot = save_data.get(active_save_slot, DEFAULT_SLOT)
     y0 = 80 + achievements_scroll
     h = 80
@@ -1669,6 +1713,7 @@ def create_achievements_ui():
 
     # 5) If we just unlocked something (within the last POPUP_DURATION_MS), draw a popup:
 
+# Draw the achievement popup if achievment was just unlocked
 def draw_achievement_popup():
     """
     If just_unlocked is (idx, start_ms) and we’re still within POPUP_DURATION_MS,
@@ -1712,40 +1757,42 @@ predator_group = pygame.sprite.Group()
 prey_group     = pygame.sprite.Group()
 plant_group    = pygame.sprite.Group()
 
-# // UI ELEMENTS \\ #
+#=====================================================
+# UI ELEMENTS
+#=====================================================
 button_key_box = pygame.Rect(10, 10, 25, 25)
     
-fertility_handle_img = pygame.image.load("assets/fertility_handle.png").convert_alpha()
+fertility_handle_img = pygame.image.load(resource_path("assets/fertility_handle.png")).convert_alpha()
 fertility_handle_img = pygame.transform.smoothscale(
     fertility_handle_img,
     (24, 24) 
 )
 music_slider_rect   = pygame.Rect(100, 450, 400, 20)  # x, y, width, height
-size_handle_img = pygame.image.load("assets/size_handle.png").convert_alpha()
+size_handle_img = pygame.image.load(resource_path("assets/size_handle.png")).convert_alpha()
 size_handle_img = pygame.transform.smoothscale(
     size_handle_img,
     (24, 24) 
 )
-music_handle_img = pygame.image.load("assets/music_handle.png").convert_alpha()
+music_handle_img = pygame.image.load(resource_path("assets/music_handle.png")).convert_alpha()
 music_handle_img = pygame.transform.smoothscale(
     music_handle_img,
     (24, 24) 
 )
-vision_handle_img = pygame.image.load("assets/vision_handle2.png").convert_alpha()
-achievement_img = pygame.image.load("assets/trophy.png").convert_alpha()
+vision_handle_img = pygame.image.load(resource_path("assets/vision_handle2.png")).convert_alpha()
+achievement_img = pygame.image.load(resource_path("assets/trophy.png")).convert_alpha()
 achievment_rect = pygame.Rect(10,10,50,50)
-track_img = pygame.image.load("assets/slider.png").convert_alpha()
+track_img = pygame.image.load(resource_path("assets/slider.png")).convert_alpha()
 slow_down_button = pygame.Rect(screen_width-200, screen_height-50, 90, 40)
-start_image = pygame.image.load("assets/start_button2.png").convert_alpha()
+start_image = pygame.image.load(resource_path("assets/start_button2.png")).convert_alpha()
 start_button = start_image.get_rect(center=(
     screen_width//2,
     screen_height//2 + 200
 ))
-c_key = pygame.image.load("assets/C-Key.png").convert_alpha()
+c_key = pygame.image.load(resource_path("assets/C-Key.png")).convert_alpha()
 c_key_rect = pygame.Rect(20, 230, 30, 30)
-r_key = pygame.image.load("assets/R-Key.png").convert_alpha()
+r_key = pygame.image.load(resource_path("assets/R-Key.png")).convert_alpha()
 r_key_rect = pygame.Rect(20, 190, 30, 30)
-e_key = pygame.image.load("assets/E-Key.png").convert_alpha()
+e_key = pygame.image.load(resource_path("assets/E-Key.png")).convert_alpha()
 e_key_rect = pygame.Rect(20, 150, 30, 30)
 speed_up_button  = pygame.Rect(screen_width-100, screen_height-50, 90, 40)
 settings_button  = pygame.Rect(screen_width-100, 10, 90, 40)
@@ -1755,7 +1802,7 @@ restart_button = pygame.Rect(screen_width-100, screen_height-100, 90, 40)
 delete_save_button = [
     pygame.Rect(screen_width//2 + 160, 220 + (i-1)*100, 30, 30)
     for i in range(1, 4)]
-test_tube = pygame.image.load("assets/testtube.png").convert_alpha()
+test_tube = pygame.image.load(resource_path("assets/testtube.png")).convert_alpha()
 save_file_buttons = [
     pygame.Rect(screen_width//2 - 150, 200 + (i-1)*100, 300, 70)
     for i in range(1, 4)]
@@ -1765,12 +1812,14 @@ settings_checkboxes = [
     {"label":"Show Flight Zone","rect":pygame.Rect(100,250,20,20), "checked":True},
 ]
 
-
+#=====================================================
+# Main Loop
+#=====================================================
 decision_interval   = 20
 frame_counter       = 0
 
-# // MAIN LOOP \\ #
 def run_game():
+    #Global variables
     global time_multiplier, spectate_target, zoom_level, show_debug, show_vision 
     global show_flightzone, predator_base_size, predator_vision_distance, dragging_size_slider
     global gif_timer, gif_index, dragging_vision_slider, predator_counts, prey_counts 
@@ -1779,6 +1828,10 @@ def run_game():
     global move_x, move_y, sprinting, trying_eat, trying_reproduce, play_tutorial
     global achievements_scroll, SCROLL_SPEED, achievement_labels, previous_page, just_unlocked
     global music_playing, dragging_music_slider, music_volume, current_music
+    global save_data
+    # Global save state
+    save_data = load_save_data()
+    # Internal variables
     num_items      = len(achievement_labels)         
     item_h, pad    = 80, 10                          
     y_start        = 80                              
@@ -1788,10 +1841,14 @@ def run_game():
     frame_counter = 0
     running       = True
     currscreen    = 'savefiles'
+    # Main While Loop
     while running:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
+#=====================================================
+# Key Down Events
+#=====================================================
             if event.type == pygame.KEYDOWN:
                 if currscreen == 'gamescreen':
                     if event.key == pygame.K_ESCAPE:
@@ -1819,6 +1876,9 @@ def run_game():
                     elif event.key == pygame.K_DOWN:
                         achievements_scroll -= SCROLL_SPEED
                     achievements_scroll = max(min_scroll,min(max_scroll, achievements_scroll))
+#=====================================================
+# Key Up Events
+#=====================================================
             elif event.type == pygame.KEYUP:
                 if currscreen == 'gamescreen':
                     if event.key in (pygame.K_a, pygame.K_LEFT, pygame.K_d, pygame.K_RIGHT): move_x = 0
@@ -1826,8 +1886,12 @@ def run_game():
                     if event.key == pygame.K_LSHIFT:             sprinting = False
                     if event.key == pygame.K_e:                  trying_eat = False
                     if event.key == pygame.K_r:                  trying_reproduce = False
+#=====================================================
+# Mouse Button Down Events
+#=====================================================
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 mx,my = pygame.mouse.get_pos()
+#------------------ Game Screen Button Presses ------------------#
                 if currscreen == 'gamescreen':
                     if handle_spectate_click(mx, my):
                         continue   
@@ -1837,7 +1901,8 @@ def run_game():
                         time_multiplier = min(16, time_multiplier*2)
                     elif settings_button.collidepoint((mx,my)):
                         previous_page = currscreen
-                        currscreen = 'settings'                    
+                        currscreen = 'settings'
+#------------------ Settings Screen Button Presses ------------------#                    
                 elif currscreen == 'settings':
                     if back_button.collidepoint((mx, my)):
                         currscreen = 'gamescreen'
@@ -1854,6 +1919,7 @@ def run_game():
                             screen.fill((0,0,0))
                         elif music_slider_rect.collidepoint((mx, my)):
                             dragging_music_slider = True
+#------------------ Settings Screen Button Presses ------------------#
                 elif currscreen == 'title':
                     if start_button.collidepoint((mx, my)):
                         previous_page = currscreen
@@ -1865,6 +1931,7 @@ def run_game():
                     elif achievment_rect.collidepoint((mx, my)):
                         previous_page = currscreen
                         currscreen = 'achievements'
+#------------------ Achievements Screen Button Presses ------------------#
                 elif currscreen == 'achievements':
                     if event.button == 4:  # wheel up
                         achievements_scroll += SCROLL_SPEED
@@ -1873,6 +1940,7 @@ def run_game():
                     elif back_button.collidepoint((mx, my)):
                         currscreen = previous_page
                     achievements_scroll = max(min_scroll,min(max_scroll, achievements_scroll))
+#------------------ Pre-Game Screen Button Presses ------------------#
                 elif currscreen == "pregame" and not play_tutorial:
                     size_slider_rect = pygame.Rect(300, 300, 400, 20)
                     vision_slider_rect = pygame.Rect(300, 220, 400, 20)
@@ -1905,6 +1973,7 @@ def run_game():
                     elif achievment_rect.collidepoint((mx, my)):
                         previous_page = currscreen
                         currscreen = 'achievements'
+#------------------ End Screen Button Presses ------------------#
                 elif currscreen == 'endscreen':
                     if start_button.collidepoint((mx, my)):
                         previous_page = currscreen
@@ -1914,6 +1983,7 @@ def run_game():
                         predator_group.empty()
                         plant_group.empty()
                         screen.fill((0,0,0))
+#------------------ Save File Screen Button Presses ------------------#
                 elif currscreen == 'savefiles':
                     for idx, btn in enumerate(save_file_buttons, start=1):
                         if btn.collidepoint((mx, my)):
@@ -1943,7 +2013,9 @@ def run_game():
                             for key in data:
                                 save_data[idx][key] = data[key]
                             save_save_data(save_data)
-                
+#=====================================================
+# Mouse Button Up Events
+#=====================================================
             elif event.type == pygame.MOUSEBUTTONUP:
                 if currscreen == 'pregame' and not play_tutorial:
                     dragging_vision_slider = False
@@ -1951,10 +2023,13 @@ def run_game():
                     dragging_fertility_slider = False
                 if currscreen == 'settings':
                     dragging_music_slider = False
-            
+#=====================================================
+# Mouse Moving Events
+#=====================================================
             elif event.type == pygame.MOUSEMOTION:
                 if currscreen == 'pregame' and not play_tutorial:
                     sd = save_data[active_save_slot]
+                    # Size, Vision, Fertility sliders dragging
                     if dragging_size_slider:
                         mx, my = pygame.mouse.get_pos()
                         rel_x = max(0, min(mx - 300, 400))
@@ -1976,6 +2051,7 @@ def run_game():
                         predator_fertility = float(round(
                             sd["fertility_min"] + percent * (sd["fertility_max"] - sd["fertility_min"]),2
                         ))
+                #Music slider dragging
                 if currscreen == 'settings':
                     if dragging_music_slider:
                         mx, my = pygame.mouse.get_pos()
@@ -1984,7 +2060,9 @@ def run_game():
                         pygame.mixer.music.set_volume(music_volume)
 
         clock.tick(60)
-
+#=====================================================
+# Game Screen Logic
+#=====================================================
         if currscreen=='gamescreen':
             screen.blit(background, (0,0))
             if len(predator_group) == 0 or len(prey_group) == 0:
@@ -2051,6 +2129,7 @@ def run_game():
                     pred.decide_target(prey_group)
                 for pr in prey_group:
                     pr.decidebehaviour(predator_group)
+            # Information Updates
             if frame_counter % 10 == 0:
                 predator_counts.append(len(predator_group))
                 prey_counts.append(len(prey_group))
@@ -2058,6 +2137,9 @@ def run_game():
 
             # updates
             predator_group.update()
+            prey_group.update()
+            plant_group.update()
+            # Log highest and lowest predator values
             for p in predator_group:
                 session_size_min   = min(session_size_min, p.size)
                 session_size_max   = max(session_size_max, p.size)
@@ -2065,11 +2147,8 @@ def run_game():
                 session_vision_max = max(session_vision_max, p.vision_distance)
                 session_fertility_max = max(session_fertility_max, p.fertility)
                 session_fertility_min = min(session_fertility_min, p.fertility)
-                
-            prey_group.update()
-            plant_group.update()
 
-            # draws
+            # Setting Checkbox Draws
             show_vision = next(opt for opt in settings_checkboxes
                             if opt["label"]=="Show Vision Cone")["checked"]
             show_debug  = next(opt for opt in settings_checkboxes
@@ -2077,6 +2156,8 @@ def run_game():
             show_flightzone = next(opt for opt in settings_checkboxes
                             if opt["label"]=="Show Flight Zone")["checked"]
             blit_world_with_camera(skip=player_controlled)
+            
+            # Controlling Logic
             if controlling_mode and player_controlled:
                 player_controlled.draw_vision_mask(screen)
                 sx = int(player_controlled.x * zoom_level + cam_offset_x)
@@ -2120,16 +2201,27 @@ def run_game():
             if spectate_target:
                 draw_spectate_panel()
             simulation_seconds += (1/60) * time_multiplier
-
+#=====================================================
+# Settings Logic
+#=====================================================
         elif currscreen == 'settings':
             create_settings_ui()
-        
+
+#=====================================================
+# Title Screen Logic
+#=====================================================
         elif currscreen == 'title':
             create_title_ui()
-        
+
+#=====================================================
+# Achievments Logic
+#=====================================================
         elif currscreen == 'achievements':
             create_achievements_ui()
-        
+
+#=====================================================
+# Pre-Game Logic
+#=====================================================
         elif currscreen == 'pregame':
             if play_tutorial:
                 # — 1) catch Space/quit events —
@@ -2174,6 +2266,9 @@ def run_game():
             # once play_tutorial is False, fall back to normal pregame UI
             create_pregame_ui()
             
+#=====================================================
+# End Screen Logic
+#=====================================================
         elif currscreen == 'endscreen':
             if save_data[active_save_slot]['games_played'] >= 1 and save_data[active_save_slot]['achievment1'] == False:
                 save_data[active_save_slot]['achievment1'] = True
@@ -2188,10 +2283,15 @@ def run_game():
                 just_unlocked = (6, pygame.time.get_ticks())
                 save_save_data(save_data)
             create_endscreen_ui()
-        
+#=====================================================
+# Save File Logic
+#=====================================================
         elif currscreen == 'savefiles':
             create_save_file_ui()  
-        
+
+#=====================================================
+# Music Logic
+#=====================================================
         desired = None
         if currscreen in ('gamescreen', 'endscreen'):
             desired = GAME_MUSIC_PATH
@@ -2211,8 +2311,6 @@ def run_game():
                     music_playing = True
                 except Exception as e:
                     print(f"[MUSIC ERROR] Could not load/play {desired}: {e}")
-            
-    # now define your own counter for this run
         draw_achievement_popup()
         pygame.display.flip()
         frame_counter += 1

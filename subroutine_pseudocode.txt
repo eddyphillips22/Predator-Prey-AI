@@ -1,0 +1,29 @@
+FUNCTION save_save_data(data)
+
+OPEN "saves.csv" FOR OUTPUT
+GET key_list
+GET DEFAULT_SLOT
+
+FOR i FROM 0 TO LENGTH(key_list) - 1
+    WRITE key_list[i] + "," TO "saves.csv"
+ENDFOR
+        
+FOR slot FROM 0 TO LENGTH(data) - 1
+    IF slot EXISTS IN data THEN
+        sd = data[slot]
+    ELSE
+        sd = DEFAULT_SLOT
+    ENDIF
+ENDFOR
+
+FOR key IN key_list
+    IF key IN sd THEN
+        WRITE sd[key] + "," TO "saves.csv"
+    ELSE
+        WRITE DEFAULT_SLOT[key] + "," TO "saves.csv"
+    ENDIF
+ENDFOR
+
+CLOSE "saves.csv"
+
+END FUNCTION
